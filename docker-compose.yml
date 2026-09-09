@@ -38,7 +38,7 @@ services:
     container_name: mchs-web
     restart: unless-stopped
     ports:
-      - "8888:80"     # Exposed for cloudflared tunnel (bypasses NPM)
+      - "80:80"     # Exposed for cloudflared tunnel (bypasses NPM)
     volumes:
       - ./dist:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -46,10 +46,10 @@ services:
       - proxy
 
 networks:
-  # External network shared with Nginx Proxy Manager
+  # Local network for the application
   proxy:
-    external: true
-    name: docker_default
+    driver: bridge
 
 volumes:
   api_data:
+
