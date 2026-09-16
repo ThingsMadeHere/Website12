@@ -48,11 +48,11 @@ const faqData = [
   }
 ];
 
-export default function FAQ() {
+export default function FAQ({ setCurrentView }) {
   const [openIndex, setOpenIndex] = useState(null);
 
   return (
-    <div className="min-h-screen py-16 px-6" style={{ background: 'var(--bg-base)' }}>
+    <div className="min-h-screen py-10 sm:py-16 px-4 sm:px-6" style={{ background: 'var(--bg-base)' }}>
       <div className="max-w-xl mx-auto">
 
         {/* Header */}
@@ -100,7 +100,7 @@ export default function FAQ() {
         {/* CTA */}
         <div className="mt-12 pt-8" style={{ borderTop: '1px solid var(--border)' }}>
           <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>Still have questions?</p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               className="flex items-center gap-2 px-4 py-2 rounded text-xs transition-colors duration-150"
               style={{ border: '1px solid var(--border-light)', color: 'var(--text-muted)' }}
@@ -115,6 +115,7 @@ export default function FAQ() {
               style={{ border: '1px solid var(--border-light)', color: 'var(--text-muted)' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--text-subtle)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-light)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+              onClick={() => setCurrentView?.('chat')}
             >
               <MessageCircle className="w-3.5 h-3.5" />
               Join Chat

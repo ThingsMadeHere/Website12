@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#14532d" />
+<title>MCHS Robotics — Light Design Preview (green · gold · white)</title>
+<style>
+  :root{
+    --bg-base:#f5f6f2; --bg-elevated:#ffffff; --bg-overlay:#eceee7;
+    --border:#dfe2d7; --border-light:#c8cdbb;
+    --text-primary:#1d2419; --text-muted:#566050; --text-subtle:#8a917e;
+    --accent:#16a34a; --accent-hover:#15803d; --nav-bg:#14532d;
+    --gold:#a16207; --gold-bright:#ffc72c; --gold-bg:rgba(255,199,44,0.20); --gold-border:rgba(161,98,7,0.35);
+    --green-bg:rgba(22,163,74,0.10); --green-border:rgba(22,163,74,0.30);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-base);color:var(--text-primary);
+    font-family:Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5}
+  ::selection{background:rgba(255,199,44,0.45)}
+  .wrap{max-width:960px;margin:0 auto;padding:0 16px 64px}
+  .label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-subtle);margin:34px 0 12px;font-weight:700}
+  .card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:0 1px 3px rgba(29,36,25,0.05)}
+
+  /* nav — deep school green */
+  nav{background:var(--nav-bg);border-bottom:1px solid #0e3a20;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;position:sticky;top:0;z-index:5}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand strong{color:#fff;font-size:14px;font-weight:600}
+  .chip5728{font-size:12px;padding:2px 7px;border-radius:6px;font-weight:600;color:#ffd75e;background:rgba(255,199,44,0.16);border:1px solid rgba(255,199,44,0.45)}
+  .navtabs{display:flex;gap:4px;align-items:center}
+  .tab{padding:6px 12px;border-radius:7px;font-size:13px;color:#b9cdb2;border:1px solid transparent;background:transparent}
+  .tab.active{color:#fff;background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.18)}
+  .signin{background:var(--gold-bright);color:var(--nav-bg);font-weight:600;font-size:13px;padding:6px 12px;border-radius:7px;border:none}
+  .pill{font-size:12px;padding:2px 8px;border-radius:6px}
+  .pill.admin{background:rgba(255,199,44,0.16);color:#ffd75e;border:1px solid rgba(255,199,44,0.45)}
+  .pill.ver{background:rgba(134,239,172,0.16);color:#86efac;border:1px solid rgba(134,239,172,0.35)}
+
+  /* hero — flat light */
+  .hero{border-radius:18px;padding:44px 28px;margin-top:22px;background:var(--bg-base)}
+  .herochip{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border-radius:999px;font-size:12px;font-weight:600;color:var(--gold);background:var(--gold-bg);border:1px solid var(--gold-border)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--gold-bright)}
+  h1{font-size:42px;line-height:1.08;margin:14px 0 12px;letter-spacing:-.02em;font-weight:800}
+  h1 .green{color:#15803d}
+  .sub{color:var(--text-muted);font-size:17px;max-width:520px}
+  .btn-school{background:var(--accent);color:#fff;border:1px solid var(--accent);padding:12px 22px;border-radius:10px;font-weight:600;font-size:15px;cursor:pointer;box-shadow:0 1px 2px rgba(29,36,25,0.08)}
+  .btn-school:hover{background:var(--accent-hover);border-color:var(--accent-hover);box-shadow:0 6px 18px rgba(22,163,74,0.28)}
+  .btn-ghost{background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border);padding:12px 20px;border-radius:10px;font-weight:500;font-size:15px;cursor:pointer}
+  .plate{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:0 24px 48px rgba(29,36,25,0.12);display:flex;align-items:center;justify-content:center;padding:28px}
+  .plate svg{width:150px;height:150px}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:18px}
+  .stat{text-align:center}
+  .stat b{display:block;font-size:30px;color:var(--gold);font-weight:800}
+  .stat span{font-size:13px;color:var(--text-muted)}
+
+  .member{display:flex;gap:12px;align-items:center}
+  .av{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:#15803d;flex-shrink:0}
+  .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .tag{font-size:12px;padding:2px 8px;border-radius:6px;line-height:1.5}
+  .t-gold{color:#a16207;background:rgba(255,199,44,0.22);border:1px solid rgba(161,98,7,0.35)}
+  .t-green{color:#166534;background:rgba(22,163,74,0.12);border:1px solid rgba(22,163,74,0.32)}
+  .t-bronze{color:#92400e;background:rgba(217,160,102,0.16);border:1px solid rgba(146,64,14,0.30)}
+  .t-teal{color:#0f766e;background:rgba(20,184,166,0.10);border:1px solid rgba(15,118,110,0.30)}
+  .flag{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:2px 8px;border-radius:6px}
+  .flag.to{background:rgba(239,68,68,0.08);color:#dc2626;border:1px solid rgba(239,68,68,0.25)}
+  .flag.reset{background:rgba(255,199,44,0.22);color:#b45309;border:1px solid rgba(161,98,7,0.35)}
+
+  .msg{display:flex;gap:10px}
+  .msgname{font-weight:600;font-size:14px}
+  .msgmeta{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .link{color:var(--gold);text-decoration:underline}
+
+  .banner{background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:12px;display:flex;gap:10px}
+  .banner b{color:#dc2626}
+  .note{color:var(--text-muted);font-size:13px;margin-top:6px}
+
+  .swatches{display:flex;gap:10px;flex-wrap:wrap}
+  .sw{width:104px;border-radius:10px;overflow:hidden;border:1px solid var(--border)}
+  .sw .c{height:46px}
+  .sw .n{font-size:11px;padding:6px 8px;color:var(--text-muted);background:var(--bg-elevated)}
+  .inputs{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .inp{background:var(--bg-base);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:13px;color:var(--text-primary)}
+  @media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}h1{font-size:32px}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="brand">
+    <svg width="26" height="25" viewBox="0 0 48 46" fill="none"><path fill="#ffffff" d="M25.9 44.9c-.6.9-2 .4-2-.7V33.9c0-1.2-1-2.3-2.3-2.3H10.3c-.9 0-1.5-1-.9-1.8l7.5-10.5c1-1.5 0-3.6-1.9-3.6H1.2c-.9 0-1.5-1-.9-1.8L10 .5c.2-.3.6-.5.9-.5h28.9c.9 0 1.5 1 .9 1.8l-7.5 10.5c-1 1.5 0 3.6 1.9 3.6h11.4c.9 0 1.5 1 .9 1.8L25.9 44.9z"/></svg>
+    <strong>MCHS Robotics</strong>
+    <span class="chip5728">5728</span>
+  </div>
+  <div class="navtabs">
+    <span class="tab">Home</span><span class="tab">Board</span><span class="tab">Calendar</span>
+    <span class="tab active">⛨ Admin</span>
+    <span class="pill admin">admin</span><span class="pill ver">✓</span>
+  </div>
+</nav>
+
+<div class="wrap">
+  <div class="hero">
+    <span class="herochip"><span class="dot"></span> Team 5728 · MCHS Robotics</span>
+    <h1>From Rookie to<br><span class="green">Playoff Contender</span></h1>
+    <p class="sub">MC2 — Team 5728 is a FIRST Robotics Competition team that made playoffs in 2026. Flat color, white cards, deep-green nav — no gradients anywhere.</p>
+    <div style="display:flex;gap:12px;margin-top:22px;flex-wrap:wrap">
+      <button class="btn-school">Get Involved</button>
+      <button class="btn-ghost">Visit Our Website ›</button>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>2</b><span>Playoff Appearances</span></div>
+    <div class="stat"><b>7</b><span>2026 Wins</span></div>
+    <div class="stat"><b>2026</b><span>Swerve Drive</span></div>
+    <div class="stat"><b>#259</b><span>District Rank</span></div>
+  </div>
+
+  <div class="label">Palette — green · gold · white</div>
+  <div class="swatches">
+    <div class="sw"><div class="c" style="background:#16a34a"></div><div class="n">accent #16a34a</div></div>
+    <div class="sw"><div class="c" style="background:#15803d"></div><div class="n">hover #15803d</div></div>
+    <div class="sw"><div class="c" style="background:#14532d"></div><div class="n">nav #14532d</div></div>
+    <div class="sw"><div class="c" style="background:#ffc72c"></div><div class="n">gold #ffc72c</div></div>
+    <div class="sw"><div class="c" style="background:#a16207"></div><div class="n">gold text #a16207</div></div>
+    <div class="sw"><div class="c" style="background:#f5f6f2;border-bottom:1px solid #dfe2d7"></div><div class="n">page #f5f6f2</div></div>
+  </div>
+
+  <div class="label">Admin panel — member card (white, lifted)</div>
+  <div class="card">
+    <div class="member">
+      <div class="av" style="background:#a67c00">A</div>
+      <div style="flex:1">
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+          <strong style="font-size:14px">Alice Applicant</strong>
+          <span style="color:var(--text-subtle);font-size:12px">@alice</span>
+          <span class="tag t-gold">ADMIN</span>
+          <span style="color:#166534;font-size:13px">✔ verified</span>
+        </div>
+        <div class="tags">
+          <span class="tag t-gold">admin</span>
+          <span class="tag t-green">mentor</span>
+          <span class="tag t-bronze">build</span>
+          <span class="tag t-teal">driver</span>
+          <span class="flag to">⊘ timed out · 2h 15m left</span>
+          <span class="flag reset">🔑 reset required</span>
+        </div>
+      </div>
+      <span style="color:var(--text-subtle)">▾</span>
+    </div>
+  </div>
+
+  <div class="label">Board — message with tag pills + gold-deep link</div>
+  <div class="card">
+    <div class="msg">
+      <div class="av" style="background:#0f766e;width:28px;height:28px;font-size:12px;border-radius:7px">C</div>
+      <div>
+        <div class="msgmeta">
+          <span class="msgname">carter</span>
+          <span class="tag t-gold" style="font-size:11px">ADMIN</span>
+          <span class="tag t-green" style="font-size:11px">✓</span>
+          <span class="tag t-green" style="font-size:11px">mentor</span>
+          <span style="color:var(--text-subtle);font-size:12px">4:12 PM</span>
+        </div>
+        <p style="color:var(--text-muted);font-size:14px;margin:4px 0 0">Swerve modules are calibrated — see the sheet: <a class="link" href="#">drive-calibration.pdf</a></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="label">Inputs &amp; controls (sunken on white cards)</div>
+  <div class="card inputs">
+    <span class="inp">Search members or tags…</span>
+    <button class="btn-school" style="padding:9px 16px;font-size:13px">Save changes</button>
+    <button class="btn-ghost" style="padding:9px 16px;font-size:13px">+ New account</button>
+    <span class="tag t-green" style="padding:6px 12px">✓ Verified on</span>
+    <span class="flag reset" style="padding:6px 12px">🔑 Require reset at next login</span>
+  </div>
+
+  <div class="label">Timeout notice (board composer replacement)</div>
+  <div class="banner">
+    <span style="color:#dc2626">⊘</span>
+    <div><b>You are timed out</b><div class="note">You can read the board, but posting is disabled until Sep 20, 2026 3:00 PM. Talk to an admin if you think this is a mistake.</div></div>
+  </div>
+
+  <p class="note">Static preview of the light design system. The live app renders the same tokens: white cards on warm off-white pages, deep-green nav with a gold sign-in button, flat solid buttons (green, darker on hover), readable deep-gold text for badges/links, and red reserved strictly for destructive actions.</p>
+</div>
+</body>
+</html>

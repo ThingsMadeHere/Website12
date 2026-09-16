@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI — runs on every push and pull request, and is reused by deploy.yml.
+#   frontend:  lint (oxlint) + production build (vite)
+#   api:       syntax check + full E2E suite against a live server on a
+#              throwaway SQLite database (the same protocol scripts/deploy.sh
+#              protects in production)
+# ─────────────────────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:          # lets deploy.yml require CI before shipping
+
+jobs:
+  frontend:
+    name: Frontend (lint + production build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (lockfile-pinned)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify build output
+        run: test -f dist/index.html && test -n "$(ls dist/assets)"
+
+  api:
+    name: API (E2E suite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies (lockfile-pinned)
+        run: npm ci
+
+      - name: Syntax check
+        run: |
+          node --check index.js
+          node --check db.js
+          node --check auth.js
+          node --check mailer.js
+
+      - name: Start API on a throwaway database
+        run: |
+          DATABASE_PATH=/tmp/ci-test.db PORT=3101 RESEND_API_KEY= \
+            nohup node index.js > /tmp/ci-api.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:3101/health && exit 0
+            sleep 1
+          done
+          echo "API did not become healthy; log:"; cat /tmp/ci-api.log; exit 1
+
+      - name: Seed test admin
+        run: DATABASE_PATH=/tmp/ci-test.db npm run test:seed
+
+      - name: Run E2E suite
+        run: TEST_BASE_URL=http://localhost:3101 npm run test:e2e
+
+      - name: Server log (always)
+        if: always()
+        run: tail -n 60 /tmp/ci-api.log

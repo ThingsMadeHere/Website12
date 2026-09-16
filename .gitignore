@@ -1,4 +1,3 @@
-```
 # Dependencies
 node_modules/
 api/node_modules/
@@ -7,10 +6,16 @@ api/node_modules/
 .env
 .env.local
 *.env.*
+# ...but the documented template is safe to commit
+!.env.example
 
 # Logs and temp files
 *.log
 *.tmp
+
+# Deployment artifacts (scripts/deploy.sh, scripts/backup.sh)
+backups/
+.dist.prev/
 
 # Build artifacts
 dist/
@@ -46,4 +51,3 @@ coverage.xml
 *~
 .DS_Store
 Thumbs.db
-```

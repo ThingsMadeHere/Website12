@@ -1,24 +1,50 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 @theme {
-  --color-frc-blue: #0066B3;
-  --color-frc-red: #ED1C24;
-  --color-frc-yellow: #FFC72C;
+  /* MCHS school colors */
+  --color-school-green: #16a34a;
+  --color-school-green-deep: #14532d;
+  --color-school-gold: #ffc72c;
 }
 
-/* Design tokens */
+/* ── Design tokens — MCHS green · gold · light ─────────────────────────────
+   Light and clean: warm off-white pages, white cards, a deep-green nav bar,
+   flat color everywhere (no gradients). Gold appears two ways:
+     --gold        deep, readable gold for TEXT/borders on light surfaces
+     --gold-bright the bright school gold, for fills/dots and on dark green  */
 :root {
-  --bg-base:      #0d0d0f;
-  --bg-elevated:  #111114;
-  --bg-overlay:   #18181c;
-  --border:       #1e1e24;
-  --border-light: #2a2a32;
-  --text-primary: #f0f0f2;
-  --text-muted:   #6b6b78;
-  --text-subtle:  #3a3a44;
-  --accent:       #0066B3;
-  --accent-hover: #0077cc;
+  /* surfaces */
+  --bg-base:      #f5f6f2;   /* page */
+  --bg-elevated:  #ffffff;   /* cards, dialogs, sidebar */
+  --bg-overlay:   #eceee7;   /* inputs, subtle panels, inactive tabs */
+  --border:       #dfe2d7;
+  --border-light: #c8cdbb;
+
+  /* text */
+  --text-primary: #1d2419;
+  --text-muted:   #566050;
+  --text-subtle:  #8a917e;
+
+  /* school green — primary interactive color (hover goes darker on light) */
+  --accent:       #16a34a;
+  --accent-hover: #15803d;
+  --accent-deep:  #14532d;
+
+  /* nav bar */
+  --nav-bg:       #14532d;
+  --nav-border:   #0e3a20;
+  --nav-text:     #b9cdb2;
+
+  /* school gold */
+  --gold:         #a16207;   /* readable gold text on light */
+  --gold-bright:  #ffc72c;   /* fills, dots, chips on dark green */
+  --gold-bg:      rgba(255,199,44,0.20);
+  --gold-border:  rgba(161,98,7,0.35);
+
+  /* green tints for badges/positive states */
+  --green-bg:     rgba(22,163,74,0.10);
+  --green-border: rgba(22,163,74,0.30);
 }
 
 * { box-sizing: border-box; }
@@ -32,6 +58,84 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-::-webkit-scrollbar       { width: 4px; }
+::selection {
+  background: rgba(255,199,44,0.45);
+  color: #1d2419;
+}
+
+:focus-visible {
+  outline: 2px solid rgba(22,163,74,0.55);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: #c8cdbb; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #16a34a; }
+
+/* Tailwind gray text classes used on HomePage read correctly on light bg */
+.text-gray-400, .text-gray-500 { color: var(--text-muted); }
+
+/* ── signature pieces (flat — no gradients) ─────────────────────────────── */
+
+/* Primary CTA — solid school green, darkens + soft shadow on hover */
+.btn-school {
+  background: #16a34a;
+  color: #fff;
+  border: 1px solid #16a34a;
+  box-shadow: 0 1px 2px rgba(29,36,25,0.08);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.btn-school:hover {
+  background: #15803d;
+  border-color: #15803d;
+  box-shadow: 0 6px 18px rgba(22,163,74,0.28);
+  transform: translateY(-1px);
+}
+
+/* Gold-rimmed chip (works on light surfaces) */
+.rim-gold {
+  border: 1px solid rgba(161,98,7,0.32);
+  background: rgba(255,199,44,0.16);
+}
+
+/* ── board / calendar bits ─────────────────────────────────────────────── */
+
+/* Board layout height — dvh keeps the composer visible with mobile browser chrome */
+.board-shell {
+  height: calc(100vh - 48px);
+  height: calc(100dvh - 48px);
+}
+
+/* Calendar day cells — clickable, with hover/selected/today states */
+.day-cell {
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.day-cell:hover {
+  background: rgba(21,60,35,0.05);
+  border-color: var(--border-light);
+}
+.day-cell.today {
+  background: rgba(255,199,44,0.24);
+}
+.day-cell.today:hover {
+  background: rgba(255,199,44,0.34);
+}
+.day-cell.selected,
+.day-cell.selected:hover {
+  border-color: var(--accent);
+  background: rgba(22,163,74,0.10);
+}
+
+/* Per-message actions (delete): reveal on hover/focus on pointer devices,
+   keep faintly visible on touch devices where there is no hover. */
+.msg-actions { opacity: 0; transition: opacity 0.12s ease; }
+.msg-row:hover .msg-actions,
+.msg-row:focus-within .msg-actions { opacity: 1; }
+@media (hover: none) {
+  .msg-actions { opacity: 0.55; }
+  .msg-row:hover .msg-actions { opacity: 1; }
+}

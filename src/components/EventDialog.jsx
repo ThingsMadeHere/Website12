@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { X, Calendar as CalendarIcon, Clock, MapPin, Check, X as XIcon, Send } from 'lucide-react';
 
 export default function EventDialog({ session, onClose, onEventCreated }) {
@@ -11,6 +11,27 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
+
+  const createdEventRef = useRef(null);
+  const closeTimerRef   = useRef(null);
+
+  // clear any pending auto-close timer if we unmount early
+  useEffect(() => () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  }, []);
+
+  // Closes the dialog after a successful submit. onClose ALWAYS runs — even
+  // if the parent's callback throws — so the success overlay can never trap
+  // the user. (It used to: a broken callback left it stuck with no exit.)
+  const finishSuccess = () => {
+    if (closeTimerRef.current) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null; }
+    try {
+      if (onEventCreated) onEventCreated(createdEventRef.current);
+    } catch (err) {
+      console.error('onEventCreated failed:', err);
+    }
+    if (onClose) onClose();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -45,11 +66,10 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
       }
       
       const event = await response.json();
+      createdEventRef.current = event;
       setShowSuccess(true);
-      setTimeout(() => {
-        if (onEventCreated) onEventCreated(event);
-        onClose();
-      }, 2000);
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = setTimeout(finishSuccess, 2600);
     } catch (err) {
       setError(err.message || 'An error occurred');
     } finally {
@@ -59,8 +79,11 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
 
   if (showSuccess) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
-        <div className="w-full max-w-md p-8 rounded-xl text-center" style={{ background: 'var(--bg-overlay)', border: '1px solid var(--border)' }}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 cursor-pointer"
+           style={{ background: 'rgba(0,0,0,0.7)' }}
+           onClick={finishSuccess}>
+        <div className="w-full max-w-md p-6 sm:p-8 rounded-xl text-center"
+             style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
           <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center"
                style={{ background: 'rgba(34,197,94,0.1)' }}>
             <Check className="w-8 h-8 text-green-500" />
@@ -68,21 +91,29 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
           <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
             Event Proposed!
           </h3>
-          <p className="text-sm text-gray-400">
-            Your event has been submitted for voting. Check the board for the proposal thread.
+          <p className="text-sm text-gray-400 mb-5 leading-relaxed">
+            Your proposal is waiting under <strong style={{ color: 'var(--text-primary)' }}>“Proposals awaiting votes”</strong> below
+            the calendar. Once a majority of the team votes 👍, it moves onto the calendar automatically.
           </p>
+          <button onClick={finishSuccess}
+            className="px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: '#16a34a', color: '#fff' }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#15803d'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#16a34a'; }}>
+            Done
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="w-full max-w-lg" onClick={onClose}>
-        <div className="w-full max-w-md p-6 rounded-xl" style={{ background: 'var(--bg-overlay)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+        <div className="w-full max-w-md p-4 sm:p-6 rounded-xl max-h-[92dvh] overflow-y-auto" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+            <h2 className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
               Propose New Event
             </h2>
             <button onClick={onClose}
@@ -96,7 +127,7 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
 
           {/* Error */}
           {error && (
-            <div className="mb-4 p-3 rounded text-sm" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}>
+            <div className="mb-4 p-3 rounded text-sm" style={{ background: 'rgba(239,68,68,0.1)', color: '#dc2626', border: '1px solid rgba(239,68,68,0.2)' }}>
               {error}
             </div>
           )}
@@ -125,7 +156,7 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
             </div>
 
             {/* Date & Time */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-primary)' }}>
                   Date
@@ -249,9 +280,9 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
                 type="submit"
                 disabled={isSubmitting}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: '#0066B3', color: '#fff' }}
-                onMouseEnter={e => { e.currentTarget.style.background = '#0077cc'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = '#0066B3'; }}>
+                style={{ background: '#16a34a', color: '#fff' }}
+                onMouseEnter={e => { e.currentTarget.style.background = '#15803d'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#16a34a'; }}>
                 <Send className="w-4 h-4" />
                 {isSubmitting ? 'Submitting...' : 'Submit Event for Voting'}
               </button>

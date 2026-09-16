@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Nightly backups — belt AND suspenders next to the server cron
+# (see DEPLOYMENT.md §6). Runs scripts/backup.sh on the server over SSH.
+# Skips gracefully when the deploy secrets are not configured.
+# Manual trigger: Actions → Nightly backup → Run workflow.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Nightly backup
+
+on:
+  schedule:
+    - cron: '30 7 * * *'   # 00:30 US Pacific / 07:30 UTC
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: Backup production database
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deployment is configured
+        id: cfg
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          KEY:  ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$USER" ] || [ -z "$KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::deploy secrets not set — nothing to back up remotely."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run backup on server
+        if: steps.cfg.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          passphrase: ${{ secrets.DEPLOY_PASSPHRASE }}
+          command_timeout: 10m
+          script_stop: true
+          script: |
+            cd ${{ vars.DEPLOY_PATH || '/opt/mchs/Website12' }}
+            ./scripts/backup.sh nightly
+            ls -lh backups/ | tail -n 5

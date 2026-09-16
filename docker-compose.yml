@@ -1,6 +1,6 @@
 services:
   # One-shot service: builds the React frontend and writes output to ./dist
-  # Run with: docker compose run --rm build-frontend
+  # Run with: docker compose run --rm build-frontend   (scripts/deploy.sh does this)
   build-frontend:
     image: node:22-alpine
     working_dir: /app
@@ -14,7 +14,7 @@ services:
       - ./postcss.config.js:/app/postcss.config.js
       - ./tailwind.config.js:/app/tailwind.config.js
       - ./dist:/app/dist
-    command: sh -c "npm install && npm run build"
+    command: sh -c "npm ci && npm run build"   # lockfile-pinned, reproducible
 
   # Backend API: accounts, board channels/messages, calendar events
   api:
@@ -23,20 +23,41 @@ services:
     restart: unless-stopped
     ports:
       - "3001:3001"   # Exposed for cloudflared tunnel
+    env_file:
+      - ./api/.env    # RESEND_API_KEY / SMTP_* etc. (git-ignored — create on the server)
     environment:
       DATABASE_PATH: /app/data/mchs.db
       PORT: "3001"
+      # ── Membership-application review emails ──────────────────────────
+      ADMIN_EMAIL: physicsiscool314@gmail.com
+      PUBLIC_URL: https://mchsrobotics.dev   # base URL for approve/deny links in emails
+      # Credentials live in api/.env (see env_file above):
+      #   RESEND_API_KEY=…            (Option A — Resend)
+      #   EMAIL_FROM=…                (optional sender override)
+      #   SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS  (Option B — any SMTP)
+      # With neither option set, emails (incl. approve/deny links) are
+      # printed to the container log so the flow still works for testing.
     volumes:
       - api_data:/app/data
     networks:
       - proxy
+    # Healthcheck is defined in api/Dockerfile (GET /health every 30 s).
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Serves the React frontend and proxies /api calls to the backend.
-  # NPM (Nginx Proxy Manager) forwards mchsrobotics.dev → mchs-web:80
+  # Starts only after the API reports healthy — nginx resolves the
+  # `mchs-api` upstream at boot, so this ordering prevents crash loops.
   web:
     image: nginx:alpine
     container_name: mchs-web
     restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
       - "80:80"     # Exposed for cloudflared tunnel (bypasses NPM)
     volumes:
@@ -44,6 +65,26 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - proxy
+    logging: *default-logging
+
+  # ── Optional: Cloudflare Tunnel edge ────────────────────────────────────
+  # Reaches the site without opening any inbound ports. Create a tunnel in
+  # the Cloudflare Zero Trust dashboard (Networks → Tunnels), point its
+  # public hostname mchsrobotics.dev at http://mchs-web:80, then:
+  #   echo "TUNNEL_TOKEN=<token>" >> api/.env   (or export it in the shell)
+  #   uncomment this block, and `docker compose up -d cloudflared`
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   container_name: mchs-tunnel
+  #   restart: unless-stopped
+  #   command: tunnel run
+  #   environment:
+  #     TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+  #   networks:
+  #     - proxy
+  #   depends_on:
+  #     - web
+  #   logging: *default-logging
 
 networks:
   # Local network for the application
@@ -52,4 +93,3 @@ networks:
 
 volumes:
   api_data:
-

@@ -1,0 +1,18 @@
+# Keep the production image clean and reproducible:
+# dependencies come from `npm ci` inside the image, never from the host.
+node_modules/
+
+# Databases — production data lives in the api_data volume, not the image.
+mchs.db
+mchs.db-shm
+mchs.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets — provided at runtime via docker-compose env_file
+.env
+
+# Tests and dev artifacts
+test/
+npm-debug.log*
