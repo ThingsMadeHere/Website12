@@ -1538,6 +1538,160 @@ function scheduleMeetingReminders() {
   }, 5 * 60 * 1000); // Check every 5 minutes
 }
 
+// ── remote development workspace ─────────────────────────────────────────────
+
+/**
+ * GET /api/remote-dev/connect - Initialize remote dev session
+ * Requires authentication
+ */
+app.get('/api/remote-dev/connect', requireAuth, (req, res) => {
+  // User is authenticated, grant access to their workspace
+  // The actual file operations happen via the SSH server which uses the same auth
+  res.json({
+    success: true,
+    workspacePath: `~/Jarvis/dev/workspaces/${req.user.username}`,
+    message: 'Connected to remote development workspace'
+  });
+});
+
+/**
+ * GET /api/remote-dev/files - List files in workspace
+ * Requires authentication
+ */
+app.get('/api/remote-dev/files', requireAuth, async (req, res) => {
+  try {
+    const { path = '~' } = req.query;
+    const username = req.user.username;
+    
+    // Security: Ensure user can only access their own workspace
+    const requestedPath = String(path);
+    if (!requestedPath.includes(username)) {
+      return res.status(403).json({ 
+        error: 'Access denied: Can only access your own workspace' 
+      });
+    }
+    
+    // In production, this would call the SSH server or a file service
+    // For now, return a mock structure - the real implementation uses the SSH server
+    res.json({
+      success: true,
+      files: [
+        {
+          name: 'src',
+          path: '~/Jarvis/dev/workspaces/src',
+          type: 'folder',
+          children: [
+            { name: 'Main.java', path: '~/Jarvis/dev/workspaces/src/Main.java', type: 'file' },
+            { name: 'RobotContainer.java', path: '~/Jarvis/dev/workspaces/src/RobotContainer.java', type: 'file' }
+          ]
+        },
+        {
+          name: 'vendordeps',
+          path: '~/Jarvis/dev/workspaces/vendordeps',
+          type: 'folder',
+          children: []
+        },
+        { name: 'build.gradle', path: '~/Jarvis/dev/workspaces/build.gradle', type: 'file' },
+        { name: 'settings.gradle', path: '~/Jarvis/dev/workspaces/settings.gradle', type: 'file' }
+      ]
+    });
+  } catch (error) {
+    console.error('[Remote Dev Files] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to list files',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/remote-dev/file - Get file content
+ * Requires authentication
+ */
+app.get('/api/remote-dev/file', requireAuth, async (req, res) => {
+  try {
+    const { path } = req.query;
+    const username = req.user.username;
+    
+    if (!path) {
+      return res.status(400).json({ error: 'path parameter required' });
+    }
+    
+    // Security: Ensure user can only access their own workspace
+    const requestedPath = String(path);
+    if (!requestedPath.includes(username)) {
+      return res.status(403).json({ 
+        error: 'Access denied: Can only access your own workspace' 
+      });
+    }
+    
+    // In production, fetch from SSH server or file service
+    // Mock response for now
+    res.json({
+      success: true,
+      content: `// Sample Java file for ${username}
+package frc.robot;
+
+public class Main {
+    public static void main(String... args) {
+        System.out.println("Hello from WPLib Remote Dev!");
+    }
+}`
+    });
+  } catch (error) {
+    console.error('[Remote Dev File] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get file',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * PUT /api/remote-dev/file - Save file content
+ * Requires authentication
+ */
+app.put('/api/remote-dev/file', requireAuth, async (req, res) => {
+  try {
+    const { path, content } = req.body || {};
+    const username = req.user.username;
+    
+    if (!path || content === undefined) {
+      return res.status(400).json({ error: 'path and content required' });
+    }
+    
+    // Security: Ensure user can only modify their own workspace
+    const requestedPath = String(path);
+    if (!requestedPath.includes(username)) {
+      return res.status(403).json({ 
+        error: 'Access denied: Can only modify your own workspace' 
+      });
+    }
+    
+    // Validate content size (max 1MB per file)
+    if (String(content).length > 1024 * 1024) {
+      return res.status(400).json({ error: 'File content too large (max 1MB)' });
+    }
+    
+    // In production, save via SSH server or file service
+    // Mock success for now
+    res.json({
+      success: true,
+      message: 'File saved successfully',
+      path
+    });
+  } catch (error) {
+    console.error('[Remote Dev Save] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save file',
+      details: error.message
+    });
+  }
+});
+
 // ── start ────────────────────────────────────────────────────────────────────
 initDb().then(() => {
   app.listen(PORT, () => console.log(`API listening on :${PORT}`));

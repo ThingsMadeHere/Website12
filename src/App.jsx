@@ -6,7 +6,8 @@ import HomePage from './components/HomePage';
 import CalendarPage from './components/CalendarPage';
 import ApplicationsPage from './components/ApplicationsPage';
 import AdminPage from './components/AdminPage';
-import { MessageSquare, HelpCircle, Home, Calendar, LogIn, LogOut, ClipboardCheck, ShieldCheck } from 'lucide-react';
+import RemoteDevPage from './components/RemoteDevPage';
+import { MessageSquare, HelpCircle, Home, Calendar, LogIn, LogOut, ClipboardCheck, ShieldCheck, Terminal } from 'lucide-react';
 import logo from './assets/output-onlinepngtools.png';
 import { initializePushNotifications } from './utils/pushNotifications';
 
@@ -34,6 +35,7 @@ function Navigation({ currentView, setCurrentView, session, onLogout }) {
           { view: 'chat',   icon: MessageSquare, label: 'Board'  },
           { view: 'faq',    icon: HelpCircle,    label: 'FAQ'    },
           { view: 'calendar', icon: Calendar,    label: 'Calendar' },
+          { view: 'remote-dev', icon: Terminal,  label: 'Remote Dev' },
           ...(session?.admin
             ? [
                 { view: 'applications', icon: ClipboardCheck, label: 'Applications' },
@@ -202,6 +204,8 @@ export default function App() {
         setCurrentView(hash);
       } else if (hash === 'chat') {
         setCurrentView('chat');
+      } else if (hash === 'remote-dev' && session) {
+        setCurrentView('remote-dev');
       } else if (hash === 'applications' && isAdmin) {
         setCurrentView('applications');
       } else if (hash === 'admin' && isAdmin) {
@@ -215,7 +219,7 @@ export default function App() {
     handleHashChange(); // Initial check
 
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [isAdmin]);
+  }, [isAdmin, session]);
 
   // If the signed-in member loses admin (tag removed in the Admin panel),
   // don't leave them staring at an admin-only page.
@@ -231,6 +235,11 @@ export default function App() {
     return <LandingPage onVerified={handleVerified} onBack={handleBackToSite} />;
   }
 
+  // Remote dev is also members-only
+  if (!session && currentView === 'remote-dev') {
+    return <LandingPage onVerified={handleVerified} onBack={handleBackToSite} />;
+  }
+
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
       <Navigation
@@ -243,6 +252,7 @@ export default function App() {
       {currentView === 'chat' && session && <MessageBoard session={session} refreshSession={refreshSession} />}
       {currentView === 'faq'  && <FAQ setCurrentView={setCurrentView} />}
       {currentView === 'calendar' && <CalendarPage session={session} setCurrentView={setCurrentView} />}
+      {currentView === 'remote-dev' && session && <RemoteDevPage session={session} />}
       {currentView === 'applications' && session?.admin && <ApplicationsPage session={session} />}
       {currentView === 'admin' && session?.admin && <AdminPage session={session} />}
     </div>
