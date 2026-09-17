@@ -1,1 +1,2 @@
 # Place your SSH public key (id_ed25519.pub) content here
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMLsouINpV7t04aiRl86pTJjRO3+bhTfoBQE8HMVIqZa api-to-ssh-server

@@ -28,6 +28,10 @@ services:
     environment:
       DATABASE_PATH: /app/data/mchs.db
       PORT: "3001"
+      COMPILER_QUEUE_DIR: /app/queue
+      SSH_HOST: wplib-ssh
+      SSH_PORT: "2222"
+      SSH_PRIVATE_KEY: /workspace/ssh-keys/id_ed25519
       # ── Membership-application review emails ──────────────────────────
       ADMIN_EMAIL: physicsiscool314@gmail.com
       PUBLIC_URL: https://mchsrobotics.dev   # base URL for approve/deny links in emails
@@ -39,6 +43,8 @@ services:
       # printed to the container log so the flow still works for testing.
     volumes:
       - api_data:/app/data
+      - compiler_queue:/app/queue
+      - ./ssh-keys:/workspace/ssh-keys:ro
     networks:
       - proxy
     # Healthcheck is defined in api/Dockerfile (GET /health every 30 s).
