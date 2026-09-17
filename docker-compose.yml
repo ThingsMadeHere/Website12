@@ -67,6 +67,46 @@ services:
       - proxy
     logging: *default-logging
 
+  # ── Ultra-Secure SSH Server for WPlib Remote Development ───────────────────
+  # Only accepts connections from robot IP (10.57.28.2)
+  # Provides SFTP access restricted to ~/Jarvis/dev/workspaces
+  # Uses key-only authentication with maximum security hardening
+  ssh-server:
+    build: ./ssh-server
+    container_name: wplib-ssh
+    restart: unless-stopped
+    volumes:
+      # Mount your SSH public key for authentication
+      - ./ssh-keys/authorized_keys:/home/wplib-dev/.ssh/authorized_keys:ro
+      # Persist workspaces directory
+      - wplib_workspaces:/home/wplib-dev/Jarvis/dev/workspaces
+      # SSH host keys (generated on first run)
+      - ssh_host_keys:/etc/ssh
+    networks:
+      - proxy
+    environment:
+      # Robot IP for reverse tunnel (optional - robot initiates connection)
+      - ROBOT_IP=10.57.28.2
+    logging: *default-logging
+
+  # ── Java Compilation Queue Service ─────────────────────────────────────────
+  # Handles Java 17/25 compilation for robot code deployment
+  # Processes jobs sequentially from queue to prevent conflicts
+  java-compiler:
+    build: ./java-compiler
+    container_name: wplib-compiler
+    restart: unless-stopped
+    volumes:
+      # Shared workspace with SSH server
+      - wplib_workspaces:/app/workspaces
+      # Compilation queue directory (shared with API)
+      - compiler_queue:/app/queue
+      # Compilation output/logs
+      - compiler_output:/app/output
+    networks:
+      - proxy
+    logging: *default-logging
+
   # ── Optional: Cloudflare Tunnel edge ────────────────────────────────────
   # Reaches the site without opening any inbound ports. Create a tunnel in
   # the Cloudflare Zero Trust dashboard (Networks → Tunnels), point its
@@ -93,3 +133,7 @@ networks:
 
 volumes:
   api_data:
+  wplib_workspaces:
+  ssh_host_keys:
+  compiler_queue:
+  compiler_output:
