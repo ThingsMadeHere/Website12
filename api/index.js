@@ -16,6 +16,7 @@ const {
   sendBoardMessageNotification, sendMeetingReminderNotification,
   vapidPublicKey, subscriptions
 } = require('./push');
+const robot = require('./robot');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -164,6 +165,156 @@ function slugifyChannelName(raw) {
 
 // ── health ───────────────────────────────────────────────────────────────────
 app.get('/health', (_, res) => res.json({ ok: true }));
+
+// ── robot telemetry & deployment ─────────────────────────────────────────────
+/**
+ * GET /api/robot/telemetry - Fetch telemetry from robot (10.57.28.2)
+ * Requires authentication
+ */
+app.get('/api/robot/telemetry', requireAuth, async (req, res) => {
+  try {
+    const result = await robot.getTelemetry(req.user?.token);
+    
+    if (result.success) {
+      res.json({ success: true, data: result.data });
+    } else {
+      res.status(result.statusCode || 503).json({
+        success: false,
+        error: 'Failed to fetch telemetry from robot',
+        details: result.data
+      });
+    }
+  } catch (error) {
+    console.error('[Robot Telemetry] Error:', error.message);
+    res.status(503).json({
+      success: false,
+      error: 'Robot communication failed',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/robot/deploy - Deploy compiled code to robot
+ * Requires admin authentication
+ * Accepts tar.gz archive in multipart form
+ */
+app.post('/api/robot/deploy', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    // Expect base64-encoded tar.gz in request body
+    const { codeArchive } = req.body;
+    
+    if (!codeArchive) {
+      return res.status(400).json({
+        success: false,
+        error: 'No code archive provided'
+      });
+    }
+    
+    const archiveBuffer = Buffer.from(codeArchive, 'base64');
+    const result = await robot.deployCode(archiveBuffer, req.user?.token);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Code deployed successfully to robot',
+        data: result.data
+      });
+    } else {
+      res.status(result.statusCode || 500).json({
+        success: false,
+        error: 'Deployment failed',
+        details: result.data
+      });
+    }
+  } catch (error) {
+    console.error('[Robot Deploy] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Deployment failed',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/robot/compile - Submit code compilation job to queue
+ * Requires authentication
+ * Body: { workspacePath, target?, javaVersion? }
+ */
+app.post('/api/robot/compile', requireAuth, async (req, res) => {
+  try {
+    const { workspacePath, target = 'simulation', javaVersion = '17' } = req.body || {};
+    
+    if (!workspacePath) {
+      return res.status(400).json({
+        success: false,
+        error: 'workspacePath is required'
+      });
+    }
+    
+    const result = await robot.submitCompilationJob({
+      workspacePath,
+      target,
+      javaVersion,
+      requestedBy: req.user.username
+    });
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    console.error('[Compile Job] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to queue compilation job',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/robot/compile/:jobId/status - Get compilation job status
+ * Requires authentication
+ */
+app.get('/api/robot/compile/:jobId/status', requireAuth, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const result = await robot.getJobStatus(jobId);
+    res.json(result);
+  } catch (error) {
+    console.error('[Job Status] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get job status',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/robot/health - Check robot connectivity
+ * Requires authentication
+ */
+app.get('/api/robot/health', requireAuth, async (req, res) => {
+  try {
+    const connected = await robot.checkRobotConnection();
+    res.json({
+      success: true,
+      connected,
+      robotIp: robot.ROBOT_IP
+    });
+  } catch (error) {
+    console.error('[Robot Health] Error:', error.message);
+    res.status(503).json({
+      success: false,
+      connected: false,
+      error: error.message
+    });
+  }
+});
 
 // ── membership applications ──────────────────────────────────────────────────
 // Signing up no longer creates an account directly. Visitors submit an
@@ -1401,6 +1552,13 @@ initDb().then(() => {
   
   // Start meeting reminder scheduler
   scheduleMeetingReminders();
+  
+  // Robot connectivity check on startup
+  robot.checkRobotConnection().then(connected => {
+    console.log(`[Robot] Connection to ${robot.ROBOT_IP}: ${connected ? 'OK' : 'OFFLINE'}`);
+  }).catch(err => {
+    console.error('[Robot] Connection check failed:', err.message);
+  });
 }).catch(err => {
   console.error('DB init failed:', err);
   process.exit(1);

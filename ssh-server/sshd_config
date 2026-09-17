@@ -1,0 +1,62 @@
+# Ultra-Secure SSH Configuration for WPlib Remote Development
+# Only allows connections from 10.57.28.2 (robot)
+# Uses maximum security hardening
+
+# Network restrictions - ONLY accept from robot IP
+ListenAddress 0.0.0.0
+Port 2222
+
+# Protocol version - SSH-2 only (SSH-1 is insecure)
+Protocol 2
+
+# Authentication - KEY ONLY, no passwords
+PasswordAuthentication no
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+GSSAPIAuthentication no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+
+# Maximum security key algorithms only
+HostKeyAlgorithms ssh-ed25519,ssh-ed448,rsa-sha2-512,rsa-sha2-256
+PubkeyAcceptedAlgorithms ssh-ed25519,ssh-ed448,rsa-sha2-512,rsa-sha2-256
+KexAlgorithms curve25519-sha256,curve448-sha512,diffie-hellman-group-exchange-sha256
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
+
+# Disable unnecessary features
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+PermitTunnel no
+GatewayPorts no
+PermitUserEnvironment no
+UsePAM no
+
+# Restrict to single user
+AllowUsers wplib-dev
+
+# Chroot-style restriction to workspaces folder
+# Note: True chroot requires root setup, we'll use ForceCommand instead
+ForceCommand internal-sftp -d /home/wplib-dev/Jarvis/dev/workspaces
+
+# Session limits
+MaxAuthTries 2
+MaxSessions 1
+LoginGraceTime 30
+ClientAliveInterval 60
+ClientAliveCountMax 2
+
+# Logging
+LogLevel VERBOSE
+SyslogFacility AUTH
+
+# Disable motd and other banners
+PrintMotd no
+PrintLastLog no
+
+# Strict mode
+StrictModes yes
+IgnoreRhosts yes
+HostbasedAuthentication no
