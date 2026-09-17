@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Install deps first (cached layer) — exact versions from the lockfile.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && npm install ssh2 --omit=dev
 
 # App source (api/.dockerignore keeps host node_modules, databases and
 # secrets out of the image)
