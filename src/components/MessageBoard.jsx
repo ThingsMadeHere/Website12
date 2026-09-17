@@ -151,17 +151,14 @@ export default function MessageBoard({ session, refreshSession }) {
   const [sendError, setSendError]   = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false); // mobile channel drawer
   const [now, setNow]               = useState(Date.now());
-  const [notificationEnabled, setNotificationEnabled] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState('all'); // 'all' | 'mentions_only' | 'none'
   const [showSettings, setShowSettings] = useState(false);
-  const [isPageVisible, setIsPageVisible] = useState(true);
 
   const lastIdRef    = useRef(0);
   const lastDelIdRef = useRef(0); // deletion-tombstone cursor
   const endRef       = useRef(null);
   const inputRef     = useRef(null);
   const token        = session.token;
-  const previousMessageCountRef = useRef(0);
 
   // Timeout state — the server blocks writes; this shows the member why.
   const timeoutUntil = session.timeoutUntil ? new Date(session.timeoutUntil) : null;
@@ -181,7 +178,6 @@ export default function MessageBoard({ session, refreshSession }) {
         if (res.ok) {
           const me = await res.json();
           setNotificationSettings(me.notificationSettings || 'all');
-          setNotificationEnabled(me.notificationSettings !== 'none');
         }
       } catch { /* ignore */ }
     };
@@ -201,24 +197,13 @@ export default function MessageBoard({ session, refreshSession }) {
       });
       if (res.ok) {
         setNotificationSettings(settings);
-        setNotificationEnabled(settings !== 'none');
       }
     } catch { /* ignore */ }
   }, [token]);
 
-
   // Toggle notifications - open settings modal
   const toggleNotifications = useCallback(() => {
     setShowSettings(true);
-  }, []);
-
-  // Browser visibility detection
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      setIsPageVisible(!document.hidden);
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   // Authenticated fetch helper
@@ -323,7 +308,7 @@ export default function MessageBoard({ session, refreshSession }) {
 
     const t = setInterval(poll, POLL_MS);
     return () => { cancelled = true; clearInterval(t); };
-  }, [activeId, api, notificationEnabled, isPageVisible, channels, session.userId]);
+  }, [activeId, api]);
 
   // ── autoscroll + focus ──────────────────────────────────────────────────
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -579,10 +564,10 @@ export default function MessageBoard({ session, refreshSession }) {
               onClick={toggleNotifications}
               title="Notification settings"
               className="p-1.5 rounded transition-colors"
-              style={{ color: notificationEnabled ? 'var(--accent)' : 'var(--text-subtle)' }}
+              style={{ color: notificationSettings !== 'none' ? 'var(--accent)' : 'var(--text-subtle)' }}
               onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
-              onMouseLeave={e => e.currentTarget.style.color = notificationEnabled ? 'var(--accent)' : 'var(--text-subtle)'}>
-              {notificationEnabled ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+              onMouseLeave={e => e.currentTarget.style.color = notificationSettings !== 'none' ? 'var(--accent)' : 'var(--text-subtle)'}>
+              {notificationSettings !== 'none' ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
             </button>
             <Users className="w-3.5 h-3.5" style={{ color: 'var(--text-subtle)' }} />
             <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{memberCount}</span>
