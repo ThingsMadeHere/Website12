@@ -1,21 +1,21 @@
-# Dependencies
-node_modules/
-api/node_modules/
-
-# Environment
+```
+# Environment files
 .env
 .env.local
 *.env.*
-# ...but the documented template is safe to commit
-!.env.example
 
-# Logs and temp files
-*.log
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 *.tmp
 
-# Deployment artifacts (scripts/deploy.sh, scripts/backup.sh)
-backups/
-.dist.prev/
+# Logs
+*.log
+
+# Dependencies
+node_modules/
 
 # Build artifacts
 dist/
@@ -27,27 +27,37 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.py.class
-.Python
-env/
-venv/
-.venv/
-.ENV
-.python-version
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.git/modules/
-.DS_Store
-*.swp
-*.swo
-*~
+*.so
+*.egg-info/
+.eggs/
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.jnilib
+
+# Docker
+.dockerenv
+!Dockerfile
+!docker-compose.yml
+
+# SSH keys (but preserve the ssh-keys directory structure)
+ssh-keys/id_*
+ssh-keys/*.pub
+!ssh-keys/authorized_keys
+
+# Temporary and cache files
+*.tmp
+*.temp
+*.cache
+.TemporaryItems
+.Trashes
+
+# OS specific
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Icon?
+```
