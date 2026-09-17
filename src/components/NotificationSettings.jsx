@@ -1,34 +1,30 @@
-import { Bell, BellOff, Users, AlertCircle, Check } from 'lucide-react';
+import { Bell, BellOff, Users, X, Check } from 'lucide-react';
 
-export default function NotificationSettings({ 
-  settings, 
-  onChange, 
-  onClose 
-}) {
-  const options = [
-    {
-      value: 'all',
-      title: 'All Messages',
-      description: 'Get notified for all messages when online, only mentions when offline',
-      icon: Bell,
-      color: '#16a34a'
-    },
-    {
-      value: 'mentions_only',
-      title: 'Mentions Only',
-      description: 'Only get notified when you are @mentioned or @everyone is used',
-      icon: Users,
-      color: '#a16207'
-    },
-    {
-      value: 'none',
-      title: 'None',
-      description: 'Disable all notifications',
-      icon: BellOff,
-      color: '#dc2626'
-    }
-  ];
+const NOTIFICATION_OPTIONS = [
+  {
+    value: 'all',
+    title: 'All Messages',
+    description: 'Get notified for all messages when online, only mentions when offline',
+    icon: Bell,
+    color: '#16a34a'
+  },
+  {
+    value: 'mentions_only',
+    title: 'Mentions Only',
+    description: 'Only get notified when you are @mentioned or @everyone is used',
+    icon: Users,
+    color: '#a16207'
+  },
+  {
+    value: 'none',
+    title: 'None',
+    description: 'Disable all notifications',
+    icon: BellOff,
+    color: '#dc2626'
+  }
+];
 
+export default function NotificationSettings({ settings, onChange, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div 
@@ -47,12 +43,12 @@ export default function NotificationSettings({
             className="p-1 rounded transition-colors"
             style={{ color: 'var(--text-subtle)' }}
           >
-            <AlertCircle className="w-5 h-5" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="space-y-3">
-          {options.map((option) => {
+          {NOTIFICATION_OPTIONS.map((option) => {
             const Icon = option.icon;
             const isSelected = settings === option.value;
             

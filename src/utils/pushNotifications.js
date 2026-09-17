@@ -1,7 +1,9 @@
 // Push notification utilities for the frontend
 // Handles service worker registration and push subscription management
 
-// Convert base64 string to Uint8Array for the subscription
+/**
+ * Convert base64 string to Uint8Array for VAPID key
+ */
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding)
@@ -18,16 +20,19 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// Register the service worker
+/**
+ * Register the service worker
+ * @returns {Promise<ServiceWorkerRegistration|false>}
+ */
 export async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) {
-    console.warn('Service workers are not supported in this browser');
+    console.warn('Service workers are not supported');
     return false;
   }
 
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
-    console.log('Service Worker registered with scope:', registration.scope);
+    console.log('Service Worker registered:', registration.scope);
     return registration;
   } catch (error) {
     console.error('Service Worker registration failed:', error);
@@ -35,10 +40,12 @@ export async function registerServiceWorker() {
   }
 }
 
-// Request notification permission
+/**
+ * Request notification permission
+ * @returns {Promise<'granted'|'denied'|'unsupported'>}
+ */
 export async function requestNotificationPermission() {
   if (!('Notification' in window)) {
-    console.warn('This browser does not support notifications');
     return 'unsupported';
   }
 
@@ -47,32 +54,31 @@ export async function requestNotificationPermission() {
   }
 
   if (Notification.permission !== 'denied') {
-    const permission = await Notification.requestPermission();
-    return permission;
+    return await Notification.requestPermission();
   }
 
   return 'denied';
 }
 
-// Subscribe to push notifications
-export async function subscribeToPushNotifications(registration, token) {
+/**
+ * Subscribe to push notifications
+ * @param {ServiceWorkerRegistration} registration 
+ * @param {string} token 
+ * @returns {Promise<boolean>}
+ */
+export async function subscribeToPush(registration, token) {
   try {
-    // Get the VAPID key from the server first
     const vapidResponse = await fetch('/api/push/vapid-key');
-    if (!vapidResponse.ok) {
-      throw new Error('Failed to get VAPID key');
-    }
+    if (!vapidResponse.ok) throw new Error('Failed to get VAPID key');
     
     const { publicKey } = await vapidResponse.json();
     const convertedVapidKey = urlBase64ToUint8Array(publicKey);
     
-    // Subscribe to push
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: convertedVapidKey
     });
     
-    // Send subscription to server
     const response = await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: {
@@ -82,20 +88,22 @@ export async function subscribeToPushNotifications(registration, token) {
       body: JSON.stringify({ subscription })
     });
     
-    if (!response.ok) {
-      throw new Error('Failed to register subscription with server');
-    }
+    if (!response.ok) throw new Error('Failed to register subscription');
     
     console.log('Successfully subscribed to push notifications');
     return true;
   } catch (error) {
-    console.error('Failed to subscribe to push notifications:', error);
+    console.error('Failed to subscribe to push:', error);
     return false;
   }
 }
 
-// Unsubscribe from push notifications
-export async function unsubscribeFromPushNotifications(token) {
+/**
+ * Unsubscribe from push notifications
+ * @param {string} token 
+ * @returns {Promise<boolean>}
+ */
+export async function unsubscribeFromPush(token) {
   try {
     const response = await fetch('/api/push/unsubscribe', {
       method: 'POST',
@@ -105,30 +113,28 @@ export async function unsubscribeFromPushNotifications(token) {
       }
     });
     
-    if (!response.ok) {
-      throw new Error('Failed to unregister subscription from server');
-    }
+    if (!response.ok) throw new Error('Failed to unregister subscription');
     
     console.log('Successfully unsubscribed from push notifications');
     return true;
   } catch (error) {
-    console.error('Failed to unsubscribe from push notifications:', error);
+    console.error('Failed to unsubscribe from push:', error);
     return false;
   }
 }
 
-// Check subscription status
+/**
+ * Check subscription status
+ * @param {string} token 
+ * @returns {Promise<boolean>}
+ */
 export async function checkSubscriptionStatus(token) {
   try {
     const response = await fetch('/api/push/subscription', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
+      headers: { 'Authorization': `Bearer ${token}` }
     });
     
-    if (!response.ok) {
-      throw new Error('Failed to check subscription status');
-    }
+    if (!response.ok) throw new Error('Failed to check subscription status');
     
     const { subscribed } = await response.json();
     return subscribed;
@@ -138,33 +144,32 @@ export async function checkSubscriptionStatus(token) {
   }
 }
 
-// Initialize push notifications for a logged-in user
+/**
+ * Initialize push notifications for a logged-in user
+ * @param {string} token 
+ * @returns {Promise<boolean>}
+ */
 export async function initializePushNotifications(token) {
   try {
-    // Register service worker
     const registration = await registerServiceWorker();
     if (!registration) {
-      console.warn('Service worker registration failed, push notifications unavailable');
+      console.warn('Service worker registration failed');
       return false;
     }
     
-    // Request notification permission
     const permission = await requestNotificationPermission();
     if (permission !== 'granted') {
       console.log('Notification permission not granted:', permission);
       return false;
     }
     
-    // Check if already subscribed
     const isSubscribed = await checkSubscriptionStatus(token);
     if (isSubscribed) {
       console.log('Already subscribed to push notifications');
       return true;
     }
     
-    // Subscribe to push notifications
-    const success = await subscribeToPushNotifications(registration, token);
-    return success;
+    return await subscribeToPush(registration, token);
   } catch (error) {
     console.error('Failed to initialize push notifications:', error);
     return false;
