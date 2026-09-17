@@ -1,8 +1,26 @@
 ```
-# Environment files
-.env
-.env.local
-*.env.*
+# Compiled and binary files
+*.pyc
+*.class
+*.o
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+dist/
+build/
+.mypy_cache/
+.pytest_cache/
+target/
+.gradle/
 
 # Editor/IDE files
 .vscode/
@@ -11,53 +29,36 @@
 *.swo
 *.tmp
 
-# Logs
-*.log
-
-# Dependencies
-node_modules/
-
-# Build artifacts
-dist/
-build/
-target/
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.so
-*.egg-info/
-.eggs/
-
-# Java
-*.class
-*.jar
-*.war
-*.ear
-*.jnilib
-
-# Docker
-.dockerenv
-!Dockerfile
-!docker-compose.yml
-
-# SSH keys (but preserve the ssh-keys directory structure)
-ssh-keys/id_*
-ssh-keys/*.pub
-!ssh-keys/authorized_keys
-
-# Temporary and cache files
-*.tmp
-*.temp
-*.cache
-.TemporaryItems
-.Trashes
-
-# OS specific
+# System/Environment files
 .DS_Store
 Thumbs.db
-ehthumbs.db
-Icon?
+.env
+.env.local
+*.env.*
+
+# Logs and coverage
+*.log
+coverage/
+htmlcov/
+.coverage
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
 ```
