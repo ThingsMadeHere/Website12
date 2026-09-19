@@ -13,14 +13,12 @@ Protocol 2
 PasswordAuthentication no
 PermitEmptyPasswords no
 ChallengeResponseAuthentication no
-KerberosAuthentication no
-GSSAPIAuthentication no
 PubkeyAuthentication yes
 AuthenticationMethods publickey
 
-# Maximum security key algorithms only
-HostKeyAlgorithms ssh-ed25519,ssh-ed448,rsa-sha2-512,rsa-sha2-256
-PubkeyAcceptedAlgorithms ssh-ed25519,ssh-ed448,rsa-sha2-512,rsa-sha2-256
+# Maximum security key algorithms only (using widely supported secure algorithms)
+HostKeyAlgorithms ssh-ed25519
+PubkeyAcceptedAlgorithms ssh-ed25519
 KexAlgorithms curve25519-sha256,curve448-sha512,diffie-hellman-group-exchange-sha256
 Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
 MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com
