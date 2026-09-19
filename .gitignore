@@ -1,6 +1,22 @@
 ```
-# SSH keys should not be committed
-ssh-keys/
+# Configuration backup files (if any)
+*.bak
+*.backup
+*.orig
+*.save
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
 
 # Environment files
 .env
@@ -12,30 +28,29 @@ node_modules/
 .venv/
 venv/
 __pycache__/
-*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Build artifacts
 dist/
 build/
 target/
-.gradle/
-.mypy_cache/
-.pytest_cache/
-coverage/
-htmlcov/
-*.coverage
+*.pyc
+*.class
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
 
-# Editor/IDE files
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*.tmp
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
 
 # Compressed files
 *.zip
@@ -56,4 +71,8 @@ Thumbs.db
 *.Z
 *.lz
 *.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
 ```
