@@ -29,9 +29,6 @@ services:
       DATABASE_PATH: /app/data/mchs.db
       PORT: "3001"
       COMPILER_QUEUE_DIR: /app/queue
-      SSH_HOST: wplib-ssh
-      SSH_PORT: "2222"
-      SSH_PRIVATE_KEY: /workspace/ssh-keys/id_ed25519
       # ── Membership-application review emails ──────────────────────────
       ADMIN_EMAIL: physicsiscool314@gmail.com
       PUBLIC_URL: https://mchsrobotics.dev   # base URL for approve/deny links in emails
@@ -44,7 +41,6 @@ services:
     volumes:
       - api_data:/app/data
       - compiler_queue:/app/queue
-      - ./ssh-keys:/workspace/ssh-keys:rw
     networks:
       - proxy
     # Healthcheck is defined in api/Dockerfile (GET /health every 30 s).
@@ -83,7 +79,7 @@ services:
     restart: unless-stopped
     volumes:
       # Mount your SSH public key for authentication
-      - ./ssh-keys/authorized_keys:/home/wplib-dev/.ssh/authorized_keys:rw
+      - ./ssh-keys/authorized_keys:/home/wplib-dev/.ssh/authorized_keys:ro
       # Persist workspaces directory
       - wplib_workspaces:/home/wplib-dev/Jarvis/dev/workspaces
       # SSH host keys (generated on first run)
