@@ -1,24 +1,19 @@
 ```
-# Configuration and system files
+# Configuration backup files (if any)
+*.bak
+*.backup
+*.orig
+*.save
+
+# Logs
 *.log
-*.tmp
-*.swp
-*.swo
 
 # Environment files
 .env
 .env.local
 *.env.*
 
-# Editor/IDE files
-.vscode/
-.idea/
-
-# System files
+# OS generated files
 .DS_Store
 Thumbs.db
-
-# SSH-related (since sshd_config was modified)
-.ssh/
-ssh-keys/
 ```
