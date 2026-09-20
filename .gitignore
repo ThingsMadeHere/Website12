@@ -1,15 +1,18 @@
-```
-# System files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Environment files
+```bash
+# Environment
 .env
 .env.local
 *.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Dependencies
 node_modules/
@@ -23,7 +26,7 @@ build/
 target/
 .gradle/
 
-# Compiled files
+# Compiled and binary files
 *.pyc
 *.class
 *.o
@@ -34,12 +37,9 @@ target/
 *.obj
 *.out
 
-# Editor/IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
+# System files
+.DS_Store
+Thumbs.db
 
 # Coverage
 coverage/

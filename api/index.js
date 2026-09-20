@@ -1540,6 +1540,47 @@ function scheduleMeetingReminders() {
 
 // ── remote development workspace ─────────────────────────────────────────────
 
+const os = require('os');
+
+/**
+ * Expand tilde to user's home directory securely
+ * @param {string} filePath - Path that may start with ~
+ * @param {string} username - Username to restrict access to
+ * @returns {object} { resolvedPath, error }
+ */
+function expandTildePath(filePath, username) {
+  const requestedPath = String(filePath || '').trim();
+  
+  // Expand tilde to actual home directory
+  let resolvedPath;
+  if (requestedPath.startsWith('~/')) {
+    const homeDir = os.homedir();
+    resolvedPath = path.join(homeDir, requestedPath.slice(2));
+  } else if (requestedPath.startsWith('~')) {
+    // Just ~ alone
+    resolvedPath = os.homedir();
+  } else {
+    resolvedPath = requestedPath;
+  }
+  
+  // Normalize the path to resolve any ../ or ./
+  resolvedPath = path.normalize(resolvedPath);
+  
+  // Security: Ensure the resolved path is within the user's workspace
+  const workspaceBase = path.join(os.homedir(), 'Jarvis', 'dev', 'workspaces', username);
+  const normalizedWorkspace = path.normalize(workspaceBase);
+  
+  // Check if resolved path starts with the workspace base
+  if (!resolvedPath.startsWith(normalizedWorkspace)) {
+    return { 
+      error: 'Access denied: Can only access your own workspace',
+      resolvedPath: null
+    };
+  }
+  
+  return { resolvedPath, error: null };
+}
+
 /**
  * GET /api/remote-dev/connect - Initialize remote dev session
  * Requires authentication
@@ -1560,40 +1601,56 @@ app.get('/api/remote-dev/connect', requireAuth, (req, res) => {
  */
 app.get('/api/remote-dev/files', requireAuth, async (req, res) => {
   try {
-    const { path = '~' } = req.query;
+    const { path: queryPath = '~' } = req.query;
     const username = req.user.username;
     
-    // Security: Ensure user can only access their own workspace
-    const requestedPath = String(path);
-    if (!requestedPath.includes(username)) {
-      return res.status(403).json({ 
-        error: 'Access denied: Can only access your own workspace' 
+    // Expand and validate the path
+    const { resolvedPath, error } = expandTildePath(queryPath, username);
+    if (error) {
+      return res.status(403).json({ error });
+    }
+    
+    // Check if path exists
+    try {
+      await fs.promises.access(resolvedPath);
+    } catch {
+      return res.status(404).json({ 
+        error: 'Path not found',
+        path: queryPath
       });
     }
     
-    // In production, this would call the SSH server or a file service
-    // For now, return a mock structure - the real implementation uses the SSH server
+    // Read directory contents
+    const stats = await fs.promises.stat(resolvedPath);
+    
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ error: 'Path must be a directory' });
+    }
+    
+    const files = await fs.promises.readdir(resolvedPath, { withFileTypes: true });
+    const fileList = await Promise.all(files.map(async (file) => {
+      const fullPath = path.join(resolvedPath, file.name);
+      const fileStats = await fs.promises.stat(fullPath).catch(() => null);
+      
+      // Convert absolute path back to tilde notation for response
+      const homeDir = os.homedir();
+      const relativePath = fullPath.startsWith(homeDir) 
+        ? '~/' + path.relative(homeDir, fullPath)
+        : fullPath;
+      
+      return {
+        name: file.name,
+        path: relativePath,
+        type: file.isDirectory() ? 'folder' : 'file',
+        size: fileStats?.size || 0,
+        modified: fileStats?.mtime?.toISOString() || null
+      };
+    }));
+    
     res.json({
       success: true,
-      files: [
-        {
-          name: 'src',
-          path: '~/Jarvis/dev/workspaces/src',
-          type: 'folder',
-          children: [
-            { name: 'Main.java', path: '~/Jarvis/dev/workspaces/src/Main.java', type: 'file' },
-            { name: 'RobotContainer.java', path: '~/Jarvis/dev/workspaces/src/RobotContainer.java', type: 'file' }
-          ]
-        },
-        {
-          name: 'vendordeps',
-          path: '~/Jarvis/dev/workspaces/vendordeps',
-          type: 'folder',
-          children: []
-        },
-        { name: 'build.gradle', path: '~/Jarvis/dev/workspaces/build.gradle', type: 'file' },
-        { name: 'settings.gradle', path: '~/Jarvis/dev/workspaces/settings.gradle', type: 'file' }
-      ]
+      path: queryPath,
+      files: fileList
     });
   } catch (error) {
     console.error('[Remote Dev Files] Error:', error.message);
@@ -1611,33 +1668,42 @@ app.get('/api/remote-dev/files', requireAuth, async (req, res) => {
  */
 app.get('/api/remote-dev/file', requireAuth, async (req, res) => {
   try {
-    const { path } = req.query;
+    const { path: queryPath } = req.query;
     const username = req.user.username;
     
-    if (!path) {
+    if (!queryPath) {
       return res.status(400).json({ error: 'path parameter required' });
     }
     
-    // Security: Ensure user can only access their own workspace
-    const requestedPath = String(path);
-    if (!requestedPath.includes(username)) {
-      return res.status(403).json({ 
-        error: 'Access denied: Can only access your own workspace' 
+    // Expand and validate the path
+    const { resolvedPath, error } = expandTildePath(queryPath, username);
+    if (error) {
+      return res.status(403).json({ error });
+    }
+    
+    // Check if file exists and is readable
+    try {
+      await fs.promises.access(resolvedPath, fs.constants.R_OK);
+    } catch {
+      return res.status(404).json({ 
+        error: 'File not found',
+        path: queryPath
       });
     }
     
-    // In production, fetch from SSH server or file service
-    // Mock response for now
+    // Verify it's a file, not a directory
+    const stats = await fs.promises.stat(resolvedPath);
+    if (!stats.isFile()) {
+      return res.status(400).json({ error: 'Path is not a file' });
+    }
+    
+    // Read file content
+    const content = await fs.promises.readFile(resolvedPath, 'utf8');
+    
     res.json({
       success: true,
-      content: `// Sample Java file for ${username}
-package frc.robot;
-
-public class Main {
-    public static void main(String... args) {
-        System.out.println("Hello from WPLib Remote Dev!");
-    }
-}`
+      path: queryPath,
+      content
     });
   } catch (error) {
     console.error('[Remote Dev File] Error:', error.message);
@@ -1655,19 +1721,17 @@ public class Main {
  */
 app.put('/api/remote-dev/file', requireAuth, async (req, res) => {
   try {
-    const { path, content } = req.body || {};
+    const { path: queryPath, content } = req.body || {};
     const username = req.user.username;
     
-    if (!path || content === undefined) {
+    if (!queryPath || content === undefined) {
       return res.status(400).json({ error: 'path and content required' });
     }
     
-    // Security: Ensure user can only modify their own workspace
-    const requestedPath = String(path);
-    if (!requestedPath.includes(username)) {
-      return res.status(403).json({ 
-        error: 'Access denied: Can only modify your own workspace' 
-      });
+    // Expand and validate the path
+    const { resolvedPath, error } = expandTildePath(queryPath, username);
+    if (error) {
+      return res.status(403).json({ error });
     }
     
     // Validate content size (max 1MB per file)
@@ -1675,12 +1739,21 @@ app.put('/api/remote-dev/file', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'File content too large (max 1MB)' });
     }
     
-    // In production, save via SSH server or file service
-    // Mock success for now
+    // Check parent directory exists
+    const parentDir = path.dirname(resolvedPath);
+    try {
+      await fs.promises.access(parentDir, fs.constants.W_OK);
+    } catch {
+      return res.status(404).json({ error: 'Parent directory not found or not writable' });
+    }
+    
+    // Write file content
+    await fs.promises.writeFile(resolvedPath, String(content), 'utf8');
+    
     res.json({
       success: true,
       message: 'File saved successfully',
-      path
+      path: queryPath
     });
   } catch (error) {
     console.error('[Remote Dev Save] Error:', error.message);
