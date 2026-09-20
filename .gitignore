@@ -1,1 +1,27 @@
-(api/index.js is a source file, and there are no build artifacts, dependencies, or temp files in the changes)
+```
+# Build artifacts
+dist/
+*.js
+*.css
+*.mp3
+
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editors
+.vscode/
+.idea/
+
+# OS specific
+.DS_Store
+Thumbs.db
+```

@@ -64,7 +64,10 @@ async function sendPushNotification(userId, payload) {
       icon: '/icon.svg',
       badge: '/icon.svg',
       data: payload.data || {},
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      vibrate: payload.vibrate || [200, 100, 200],
+      requireInteraction: payload.requireInteraction !== false,
+      silent: payload.silent || false
     });
 
     await webpush.sendNotification(subscription, notificationPayload);
