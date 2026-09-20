@@ -1,13 +1,12 @@
 ```
 # System files
-*.swp
-*.swo
-*.tmp
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
 
-# Environment
+# Environment files
 .env
 .env.local
 *.env.*
@@ -24,10 +23,6 @@ build/
 target/
 .gradle/
 
-# Editors
-.vscode/
-.idea/
-
 # Compiled files
 *.pyc
 *.class
@@ -38,6 +33,13 @@ target/
 *.a
 *.obj
 *.out
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
 
 # Coverage
 coverage/
