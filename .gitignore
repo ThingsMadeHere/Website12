@@ -1,70 +1,52 @@
-```gitignore
-# Compiled and binary files
-*.pyc
-*.class
-*.o
-*.exe
-*.dll
-*.so
-*.a
-*.obj
-*.out
+```
+# Build artifacts
+dist/
+build/
 
 # Dependencies
 node_modules/
-venv/
-.venv/
-__pycache__/
-dist/
-build/
-target/
-.gradle/
 
-# Editors/IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# System/Environment
-.DS_Store
-Thumbs.db
+# Environment
 .env
 .env.local
 *.env.*
 
-# Logs and coverage
+# Editors
+.vscode/
+.idea/
+
+# Logs and temp files
 *.log
-coverage/
-htmlcov/
+*.tmp
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
+.venv.bak/
+pip-log.txt
+pip-selfcheck.json
 .coverage
-
-# Cache directories
-.mypy_cache/
-.pytest_cache/
-
-# Compressed files
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
 ```

@@ -125,6 +125,21 @@ async function initDb() {
       date    TEXT NOT NULL,  -- YYYY-MM-DD
       PRIMARY KEY (series, date)
     );
+
+    -- User availability blocks for scheduling
+    CREATE TABLE IF NOT EXISTS user_availability (
+      id          INTEGER     PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title       TEXT,
+      date        TEXT        NOT NULL,  -- YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+      start_time  TEXT,       -- HH:MM
+      end_time    TEXT,       -- HH:MM
+      location    TEXT,
+      repeat_type TEXT        NOT NULL DEFAULT 'none',  -- none, weekly, monthly
+      created_at  TEXT        NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_availability_user ON user_availability(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_availability_date ON user_availability(date);
   `);
 
   // ── migrations for existing databases ────────────────────────────────────
