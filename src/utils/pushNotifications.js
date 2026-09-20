@@ -145,6 +145,31 @@ export async function checkSubscriptionStatus(token) {
 }
 
 /**
+ * Test auditory notification by playing the sound locally
+ * This can be used to verify the notification sound works
+ */
+export async function testNotificationSound() {
+  try {
+    const response = await fetch('/notification-sound.mp3');
+    if (!response.ok) throw new Error('Sound file not found');
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
+    source.start(0);
+    
+    console.log('🔊 Notification sound test played');
+    return true;
+  } catch (error) {
+    console.error('Failed to play notification sound:', error);
+    return false;
+  }
+}
+
+/**
  * Initialize push notifications for a logged-in user
  * @param {string} token 
  * @returns {Promise<boolean>}
