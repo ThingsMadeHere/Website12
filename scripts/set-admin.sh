@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
 # set-admin.sh — grant/revoke admin directly in the database.
 #
@@ -22,6 +22,12 @@ USERNAME="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
 MODE="${2:-on}"
 [[ -n "$USERNAME" ]] || { echo "usage: scripts/set-admin.sh <username> [on|off]" >&2; exit 1; }
 [[ "$MODE" == "on" || "$MODE" == "off" ]] || { echo "mode must be 'on' or 'off'" >&2; exit 1; }
+
+# Validate username format to prevent SQL injection
+if [[ ! "$USERNAME" =~ ^[a-z0-9._-]+$ ]]; then
+    echo "ERROR: Invalid username format. Only lowercase letters, numbers, dots, underscores, and hyphens allowed." >&2
+    exit 1
+fi
 
 SCRIPT='
   const Database = require("better-sqlite3");
