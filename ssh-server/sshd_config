@@ -35,9 +35,18 @@ UsePAM no
 # Restrict to single user
 AllowUsers wplib-dev
 
-# Chroot-style restriction to workspaces folder
-# Note: True chroot requires root setup, we'll use ForceCommand instead
-ForceCommand internal-sftp -d /home/wplib-dev/Jarvis/dev/workspaces
+# SFTP subsystem configuration
+Subsystem sftp internal-sftp
+
+# Match block for SFTP-only restriction to workspaces folder
+Match User wplib-dev
+    ForceCommand internal-sftp -d /home/wplib-dev/Jarvis/dev/workspaces
+    ChrootDirectory /home/wplib-dev/Jarvis/dev/workspaces
+    PermitTunnel no
+    PermitUserRC no
+    AllowAgentForwarding no
+    AllowTcpForwarding no
+    X11Forwarding no
 
 # Session limits
 MaxAuthTries 2
