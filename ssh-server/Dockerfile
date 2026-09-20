@@ -17,9 +17,17 @@ RUN apk add --no-cache \
 RUN addgroup -g 1000 wplib-dev && \
     adduser -u 1000 -G wplib-dev -h /home/wplib-dev -D wplib-dev
 
-# Set up home directory structure
+# Set up home directory structure for chroot SFTP
+# ChrootDirectory must be owned by root with no write permissions for the user
 RUN mkdir -p /home/wplib-dev/Jarvis/dev/workspaces && \
-    chown -R wplib-dev:wplib-dev /home/wplib-dev
+    chown root:root /home/wplib-dev && \
+    chmod 755 /home/wplib-dev && \
+    chown root:root /home/wplib-dev/Jarvis && \
+    chmod 755 /home/wplib-dev/Jarvis && \
+    chown root:root /home/wplib-dev/Jarvis/dev && \
+    chmod 755 /home/wplib-dev/Jarvis/dev && \
+    chown wplib-dev:wplib-dev /home/wplib-dev/Jarvis/dev/workspaces && \
+    chmod 755 /home/wplib-dev/Jarvis/dev/workspaces
 
 # Generate SSH host keys (RSA 4096-bit for maximum security)
 RUN ssh-keygen -A

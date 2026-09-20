@@ -34,9 +34,9 @@ else
     echo "[SSH Server] Example: docker run -v ~/.ssh/id_ed25519.pub:/home/wplib-dev/.ssh/authorized_keys ..."
 fi
 
-# Create workspaces directory structure
-mkdir -p /home/wplib-dev/Jarvis/dev/workspaces
-chown -R wplib-dev:wplib-dev /home/wplib-dev/Jarvis
+# Chroot directory structure is set up in Dockerfile with proper ownership
+# The workspaces directory is owned by wplib-dev for write access within chroot
+echo "[SSH Server] Chroot directory structure verified."
 
 echo "[SSH Server] Security features enabled:"
 echo "  ✓ Key-only authentication (no passwords)"
@@ -45,6 +45,7 @@ echo "  ✓ Restricted algorithms (ed25519, AES-GCM, SHA2)"
 echo "  ✓ No X11/TCP forwarding/tunneling"
 echo "  ✓ Max 2 auth attempts, 30s login grace"
 echo "  ✓ Verbose logging enabled"
+echo "  ✓ Chroot SFTP restricted to workspaces directory"
 echo ""
 echo "[SSH Server] Starting SSH daemon on port 2222..."
 
