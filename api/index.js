@@ -1551,14 +1551,19 @@ const os = require('os');
 function expandTildePath(filePath, username) {
   const requestedPath = String(filePath || '').trim();
   
+  // Get the actual user's home directory (not the process owner's)
+  // For wplib-dev user, home is /home/wplib-dev
+  const userHomeDir = username === 'wplib-dev' 
+    ? '/home/wplib-dev'
+    : path.join('/home', username);
+  
   // Expand tilde to actual home directory
   let resolvedPath;
   if (requestedPath.startsWith('~/')) {
-    const homeDir = os.homedir();
-    resolvedPath = path.join(homeDir, requestedPath.slice(2));
-  } else if (requestedPath.startsWith('~')) {
+    resolvedPath = path.join(userHomeDir, requestedPath.slice(2));
+  } else if (requestedPath === '~') {
     // Just ~ alone
-    resolvedPath = os.homedir();
+    resolvedPath = userHomeDir;
   } else {
     resolvedPath = requestedPath;
   }
@@ -1567,11 +1572,11 @@ function expandTildePath(filePath, username) {
   resolvedPath = path.normalize(resolvedPath);
   
   // Security: Ensure the resolved path is within the user's workspace
-  const workspaceBase = path.join(os.homedir(), 'Jarvis', 'dev', 'workspaces', username);
+  const workspaceBase = path.join(userHomeDir, 'Jarvis', 'dev', 'workspaces');
   const normalizedWorkspace = path.normalize(workspaceBase);
   
   // Check if resolved path starts with the workspace base
-  if (!resolvedPath.startsWith(normalizedWorkspace)) {
+  if (!resolvedPath.startsWith(normalizedWorkspace + path.sep) && resolvedPath !== normalizedWorkspace) {
     return { 
       error: 'Access denied: Can only access your own workspace',
       resolvedPath: null
