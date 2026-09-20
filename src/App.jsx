@@ -7,7 +7,8 @@ import CalendarPage from './components/CalendarPage';
 import ApplicationsPage from './components/ApplicationsPage';
 import AdminPage from './components/AdminPage';
 import RemoteDevPage from './components/RemoteDevPage';
-import { MessageSquare, HelpCircle, Home, Calendar, LogIn, LogOut, ClipboardCheck, ShieldCheck, Terminal } from 'lucide-react';
+import ProfilePage from './components/ProfilePage';
+import { MessageSquare, HelpCircle, Home, Calendar, LogIn, LogOut, ClipboardCheck, ShieldCheck, Terminal, User } from 'lucide-react';
 import logo from './assets/output-onlinepngtools.png';
 import { initializePushNotifications } from './utils/pushNotifications';
 
@@ -57,6 +58,20 @@ function Navigation({ currentView, setCurrentView, session, onLogout }) {
             </button>
           );
         })}
+
+        {/* Profile button for signed-in users */}
+        {session && (
+          <button onClick={() => setCurrentView('profile')} title="Profile"
+            className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded text-xs transition-colors duration-150 ${currentView === 'profile' ? 'active' : ''}`}
+            style={{
+              color:      currentView === 'profile' ? '#ffffff' : '#b9cdb2',
+              background: currentView === 'profile' ? 'rgba(255,255,255,0.12)' : 'transparent',
+              border:     currentView === 'profile' ? '1px solid rgba(255,255,255,0.18)' : '1px solid transparent',
+            }}>
+            <User className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">Profile</span>
+          </button>
+        )}
 
         {/* Signed out — sign-in button (gold on the green bar) */}
         {!session && (
@@ -206,6 +221,8 @@ export default function App() {
         setCurrentView('chat');
       } else if (hash === 'remote-dev' && session) {
         setCurrentView('remote-dev');
+      } else if (hash === 'profile' && session) {
+        setCurrentView('profile');
       } else if (hash === 'applications' && isAdmin) {
         setCurrentView('applications');
       } else if (hash === 'admin' && isAdmin) {
@@ -253,6 +270,7 @@ export default function App() {
       {currentView === 'faq'  && <FAQ setCurrentView={setCurrentView} />}
       {currentView === 'calendar' && <CalendarPage session={session} setCurrentView={setCurrentView} />}
       {currentView === 'remote-dev' && session && <RemoteDevPage session={session} />}
+      {currentView === 'profile' && session && <ProfilePage session={session} setCurrentView={setCurrentView} />}
       {currentView === 'applications' && session?.admin && <ApplicationsPage session={session} />}
       {currentView === 'admin' && session?.admin && <AdminPage session={session} />}
     </div>

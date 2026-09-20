@@ -748,6 +748,102 @@ app.get('/api/me', requireAuth, (req, res) => {
   });
 });
 
+// ── profile & availability ────────────────────────────────────────────────────
+
+// PUT /api/profile — update profile information (full name)
+app.put('/api/profile', requireAuth, blockIfTimedOut, (req, res) => {
+  const { fullName } = req.body || {};
+  if (!fullName || String(fullName).trim().length === 0) {
+    return res.status(400).json({ error: 'Full name is required' });
+  }
+  db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(String(fullName).trim().slice(0, 80), req.user.id);
+  res.json({ ok: true });
+});
+
+// POST /api/profile/photo — upload profile photo
+app.post('/api/profile/photo', requireAuth, blockIfTimedOut, (req, res) => {
+  const photo = (req.body || {}).photo;
+  if (!photo) {
+    return res.status(400).json({ error: 'No photo provided' });
+  }
+  
+  const mime = photo.mime || photo.type;
+  const ext = PHOTO_MIMES[mime];
+  if (!ext) {
+    return res.status(400).json({ error: 'Photo must be JPG, PNG, WebP, or GIF' });
+  }
+  
+  let buf;
+  try {
+    // Handle both base64 string and FormData
+    const dataStr = photo.data || photo;
+    buf = Buffer.from(String(dataStr), 'base64');
+  } catch {
+    return res.status(400).json({ error: 'Photo data is invalid' });
+  }
+  
+  if (buf.length < 64) {
+    return res.status(400).json({ error: 'Photo data is invalid' });
+  }
+  if (buf.length > MAX_PHOTO_BYTES) {
+    return res.status(400).json({ error: 'Photo is too large (max 6 MB)' });
+  }
+  
+  db.prepare('UPDATE users SET photo = ?, photo_mime = ? WHERE id = ?').run(buf, mime, req.user.id);
+  res.json({ ok: true });
+});
+
+// GET /api/availability — get user's availability blocks
+app.get('/api/availability', requireAuth, (_, res) => {
+  const rows = db
+    .prepare('SELECT * FROM user_availability WHERE user_id = ? ORDER BY date ASC, start_time ASC')
+    .all(req.user.id);
+  res.json(rows);
+});
+
+// POST /api/availability — create availability block
+app.post('/api/availability', requireAuth, blockIfTimedOut, (req, res) => {
+  const { title, date, startTime, endTime, location, repeatType } = req.body || {};
+  
+  if (!date) {
+    return res.status(400).json({ error: 'Date is required' });
+  }
+  
+  const insert = db.prepare(`
+    INSERT INTO user_availability (user_id, title, date, start_time, end_time, location, repeat_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  
+  const info = insert.run(
+    req.user.id,
+    title || null,
+    date,
+    startTime || null,
+    endTime || null,
+    location || null,
+    repeatType || 'none'
+  );
+  
+  res.json({ id: info.lastInsertRowid, ok: true });
+});
+
+// DELETE /api/availability/:id — delete availability block
+app.delete('/api/availability/:id', requireAuth, blockIfTimedOut, (req, res) => {
+  const id = Number(req.params.id);
+  const row = db.prepare('SELECT user_id FROM user_availability WHERE id = ?').get(id);
+  
+  if (!row) {
+    return res.status(404).json({ error: 'Availability block not found' });
+  }
+  
+  if (!req.user.admin && row.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  db.prepare('DELETE FROM user_availability WHERE id = ?').run(id);
+  res.json({ ok: true });
+});
+
 // GET /api/users/:id/photo — profile picture (admins, or the member themself)
 app.get('/api/users/:id/photo', requireAuth, (req, res) => {
   const id = Number(req.params.id);
