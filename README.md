@@ -60,7 +60,7 @@ Team portal for FRC Team 5728: a public team site plus a members-only area with 
   👍/👎; when a majority of voters say yes the event moves onto the calendar
   automatically. Proposers can delete their own proposals/events (admins can
   delete any).
-- **Recurring weekly meetings** — Wednesday lunch (Room F1) and Thursday
+- **Recurring weekly meetings** — Tuesday lunch (Room F1) and Wednesday
   after-school (Room C5, 4–6 PM) meetings are auto-seeded ~4 months ahead
   (`api/db.js` → `RECURRING_MEETINGS`), topped up every 6 h while the server
   runs. Seeding is idempotent, and an occurrence an admin deletes (holiday

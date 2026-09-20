@@ -256,20 +256,20 @@ const SEED_HORIZON_DAYS = 120;
 
 const RECURRING_MEETINGS = [
   {
-    key: 'wed-lunch-f1',
-    weekday: 3, // Wednesday
-    title: 'Wednesday Lunch Meeting',
+    key: 'tue-lunch-f1',
+    weekday: 2, // Tuesday
+    title: 'Tuesday Lunch Meeting',
     time: '12:00',
     location: 'Room F1',
-    description: 'Weekly Wednesday meeting during lunch in Room F1. All members welcome!',
+    description: 'Weekly Tuesday meeting during lunch in Room F1. All members welcome!',
   },
   {
-    key: 'thu-after-c5',
-    weekday: 4, // Thursday
-    title: 'Thursday After-School Meeting',
+    key: 'wed-after-c5',
+    weekday: 3, // Wednesday
+    title: 'Wednesday After-School Meeting',
     time: '16:00',
     location: 'Room C5',
-    description: 'Weekly Thursday meeting from 4:00 PM to 6:00 PM in Room C5, with robotics shop access.',
+    description: 'Weekly Wednesday meeting from 4:00 PM to 6:00 PM in Room C5, with robotics shop access.',
   },
 ];
 
