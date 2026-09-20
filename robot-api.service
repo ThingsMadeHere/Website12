@@ -1,0 +1,17 @@
+[Unit]
+Description=Jarvis Robot API Service
+After=network.target nginx.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/Jarvis
+Environment="NODE_ENV=production"
+ExecStart=/usr/local/bin/node /root/Jarvis/api/index.js
+Restart=always
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
