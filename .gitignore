@@ -1,27 +1,18 @@
 ```
-# Build artifacts
-dist/
-*.js
-*.css
-*.mp3
-
 # Dependencies
 node_modules/
 
-# Environment
+# Environment variables
 .env
-.env.local
-*.env.*
 
-# Logs and temp files
-*.log
-*.tmp
+# Database files
+*.db-shm
+*.db-wal
 
-# Editors
-.vscode/
-.idea/
+# Build artifacts
+dist/
 
-# OS specific
-.DS_Store
-Thumbs.db
+# Vite cache
+.vite/
+
 ```

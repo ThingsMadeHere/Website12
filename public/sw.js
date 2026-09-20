@@ -98,17 +98,10 @@ self.addEventListener('push', (event) => {
     silent: data.silent || false
   };
 
-  // Play auditory notification
-  if (!data.silent) {
-    event.waitUntil(
-      Promise.all([
-        self.registration.showNotification(data.title || 'MCHS Robotics', options),
-        playNotificationSound()
-      ])
-    );
-  } else {
-    event.waitUntil(self.registration.showNotification(data.title || 'MCHS Robotics', options));
-  }
+  // Show notification (sound will play automatically on most browsers)
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'MCHS Robotics', options)
+  );
 });
 
 // Notification click event - handle user clicking on notification
