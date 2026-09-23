@@ -21,6 +21,11 @@ const robot = require('./robot');
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
+// Dev container configuration for remote development workspace
+const DEV_CONTAINER_HOST = process.env.DEV_CONTAINER_HOST || 'dev-container';
+const DEV_CONTAINER_SSH_PORT = parseInt(process.env.DEV_CONTAINER_SSH_PORT || '2222', 10);
+const SSH_PRIVATE_KEY_PATH = process.env.SSH_PRIVATE_KEY || '/workspace/ssh-keys/id_ed25519';
+
 app.set('trust proxy', true); // honor X-Forwarded-Proto behind nginx/caddy
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '15mb' })); // applications carry base64 photos
