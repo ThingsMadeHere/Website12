@@ -1,2 +1,3 @@
-# Build artifacts
-dist/
+# SQLite WAL and SHM files
+*.db-wal
+*.db-shm
