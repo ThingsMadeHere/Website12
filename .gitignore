@@ -1,9 +1,3 @@
-# SQLite WAL/SHM files
-.env
-api/.env
+# SQLite WAL and SHM files
+*.db-wal
 *.db-shm
-*.db-wallogs/
-
-# PM2 logs
-logs/
-api/logs/

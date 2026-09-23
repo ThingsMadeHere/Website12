@@ -1,0 +1,154 @@
+2026-09-23T21:13:39: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:39:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:39: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:39:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:39:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:39:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:39:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:39:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:39:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:39:   code: 'EADDRINUSE',
+2026-09-23T21:13:39:   errno: -98,
+2026-09-23T21:13:39:   syscall: 'listen',
+2026-09-23T21:13:39:   address: '::',
+2026-09-23T21:13:39:   port: 3001
+2026-09-23T21:13:39: }
+2026-09-23T21:13:41: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:41:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:41: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:41:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:41:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:41:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:41:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:41:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:41:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:41:   code: 'EADDRINUSE',
+2026-09-23T21:13:41:   errno: -98,
+2026-09-23T21:13:41:   syscall: 'listen',
+2026-09-23T21:13:41:   address: '::',
+2026-09-23T21:13:41:   port: 3001
+2026-09-23T21:13:41: }
+2026-09-23T21:13:42: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:42:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:42: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:42:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:42:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:42:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:42:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:42:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:42:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:42:   code: 'EADDRINUSE',
+2026-09-23T21:13:42:   errno: -98,
+2026-09-23T21:13:42:   syscall: 'listen',
+2026-09-23T21:13:42:   address: '::',
+2026-09-23T21:13:42:   port: 3001
+2026-09-23T21:13:42: }
+2026-09-23T21:13:43: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:43:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:43: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:43:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:43:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:43:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:43:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:43:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:43:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:43:   code: 'EADDRINUSE',
+2026-09-23T21:13:43:   errno: -98,
+2026-09-23T21:13:43:   syscall: 'listen',
+2026-09-23T21:13:43:   address: '::',
+2026-09-23T21:13:43:   port: 3001
+2026-09-23T21:13:43: }
+2026-09-23T21:13:44: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:44:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:44: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:44:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:44:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:44:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:44:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:44:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:44:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:44:   code: 'EADDRINUSE',
+2026-09-23T21:13:44:   errno: -98,
+2026-09-23T21:13:44:   syscall: 'listen',
+2026-09-23T21:13:44:   address: '::',
+2026-09-23T21:13:44:   port: 3001
+2026-09-23T21:13:44: }
+2026-09-23T21:13:46: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:46:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:46: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:46:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:46:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:46:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:46:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:46:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:46:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:46:   code: 'EADDRINUSE',
+2026-09-23T21:13:46:   errno: -98,
+2026-09-23T21:13:46:   syscall: 'listen',
+2026-09-23T21:13:46:   address: '::',
+2026-09-23T21:13:46:   port: 3001
+2026-09-23T21:13:46: }
+2026-09-23T21:13:47: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:47:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:47: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:47:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:47:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:47:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:47:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:47:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:47:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:47:   code: 'EADDRINUSE',
+2026-09-23T21:13:47:   errno: -98,
+2026-09-23T21:13:47:   syscall: 'listen',
+2026-09-23T21:13:47:   address: '::',
+2026-09-23T21:13:47:   port: 3001
+2026-09-23T21:13:47: }
+2026-09-23T21:13:48: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:48:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:48: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:48:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:48:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:48:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:48:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:48:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:48:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:48:   code: 'EADDRINUSE',
+2026-09-23T21:13:48:   errno: -98,
+2026-09-23T21:13:48:   syscall: 'listen',
+2026-09-23T21:13:48:   address: '::',
+2026-09-23T21:13:48:   port: 3001
+2026-09-23T21:13:48: }
+2026-09-23T21:13:49: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:49:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:49: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:49:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:49:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:49:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:49:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:49:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:49:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:49:   code: 'EADDRINUSE',
+2026-09-23T21:13:49:   errno: -98,
+2026-09-23T21:13:49:   syscall: 'listen',
+2026-09-23T21:13:49:   address: '::',
+2026-09-23T21:13:49:   port: 3001
+2026-09-23T21:13:49: }
+2026-09-23T21:13:50: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:50:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:50: Error: listen EADDRINUSE: address already in use :::3001
+2026-09-23T21:13:50:     at Server.setupListenHandle [as _listen2] (node:net:1908:16)
+2026-09-23T21:13:50:     at listenInCluster (node:net:1965:12)
+2026-09-23T21:13:50:     at Server.listen (node:net:2067:7)
+2026-09-23T21:13:50:     at Function.listen (/workspace/api/node_modules/express/lib/application.js:635:24)
+2026-09-23T21:13:50:     at /workspace/api/index.js:2018:7
+2026-09-23T21:13:50:     at process.processTicksAndRejections (node:internal/process/task_queues:95:5) {
+2026-09-23T21:13:50:   code: 'EADDRINUSE',
+2026-09-23T21:13:50:   errno: -98,
+2026-09-23T21:13:50:   syscall: 'listen',
+2026-09-23T21:13:50:   address: '::',
+2026-09-23T21:13:50:   port: 3001
+2026-09-23T21:13:50: }
+2026-09-23T21:13:52: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:52:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
+2026-09-23T21:13:53: ⚠️  VAPID keys not configured. Push notifications will not work.
+2026-09-23T21:13:53:    Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY to api/.env
