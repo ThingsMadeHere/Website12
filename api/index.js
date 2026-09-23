@@ -22,7 +22,9 @@ const {
 const robot = require('./robot');
 
 const app  = express();
-const PORT = process.env.PORT || 3001;
+// parseInt: a string PORT (e.g. from PM2's env or the shell) makes
+// server.listen() treat it as a pipe/path and fail in confusing ways.
+const PORT = parseInt(process.env.PORT, 10) || 3001;
 
 // Push subscriptions are stored in SQLite — hand the handle to the push module.
 attachDb(db);
