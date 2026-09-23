@@ -1,2 +1,9 @@
-# Build artifacts
-dist/
+# SQLite WAL/SHM files
+.env
+api/.env
+*.db-shm
+*.db-wallogs/
+
+# PM2 logs
+logs/
+api/logs/
