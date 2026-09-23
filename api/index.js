@@ -14,14 +14,18 @@ const {
   createSession, destroySession, requireAuth, blockIfTimedOut,
 } = require('./auth');
 const {
-  registerSubscription, removeSubscription, getSubscription, getSubscribedUserIds,
-  sendBoardMessageNotification, sendMeetingReminderNotification,
+  attachDb, registerSubscription, removeSubscription, getSubscription, getSubscribedUserIds,
+  sendBoardMessageNotification, sendMeetingReminderNotification, sendPushNotification,
+  sendPushNotificationToMany,
   vapidPublicKey, subscriptions
 } = require('./push');
 const robot = require('./robot');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
+
+// Push subscriptions are stored in SQLite — hand the handle to the push module.
+attachDb(db);
 
 // Dev container configuration for remote development workspace
 const DEV_CONTAINER_HOST = process.env.DEV_CONTAINER_HOST || 'dev-container';
@@ -862,6 +866,28 @@ app.get('/api/users/:id/photo', requireAuth, (req, res) => {
   res.type(row.photo_mime || 'application/octet-stream').send(row.photo);
 });
 
+// GET /api/users/mentionable — usernames for the @-mention autocomplete.
+// Authenticated so guests can't enumerate the roster; verified members only.
+app.get('/api/users/mentionable', requireAuth, (_, res) => {
+  const rows = db
+    .prepare(
+      `SELECT u.username, u.full_name, u.admin,
+              COALESCE(group_concat(t.tag, ','), '') AS tags
+       FROM users u
+       LEFT JOIN user_tags t ON t.user_id = u.id AND t.tag != 'admin'
+       WHERE u.verified = 1
+       GROUP BY u.id
+       ORDER BY u.username`
+    )
+    .all();
+  res.json(rows.map(r => ({
+    username: r.username,
+    name: r.full_name || r.username,
+    admin: !!r.admin,
+    tags: r.tags ? r.tags.split(',').filter(Boolean) : [],
+  })));
+});
+
 // GET /api/users/verified — map of userId → verified (for chat badges)
 app.get('/api/users/verified', (_, res) => {
   const rows = db.prepare('SELECT id, verified FROM users').all();
@@ -1118,22 +1144,110 @@ function eventRow(row) {
   };
 }
 
-// Notify everyone with push notifications that an event landed on the calendar
+// Notify everyone subscribed to pushes that an event landed on the calendar.
+// Aggressive delivery: a prominent "New event" announcement (tagged +
+// renotify so it surfaces even if an older one is still on screen), plus the
+// reminder-style push, plus scheduled follow-ups before the event starts.
 function notifyEventApproved(event) {
   try {
     const subscribedUsers = getSubscribedUserIds();
     if (subscribedUsers.length === 0) return;
     const timeUntil = getTimeUntilString(new Date(event.date));
+    const where = event.location || 'TBD';
+
     subscribedUsers.forEach(userId => {
+      // Primary announcement
+      sendPushNotification(userId, {
+        title: `\u{1F4C5} New event: ${event.title}`,
+        body: `${where} \u2014 ${fmtEventWhen(event.date)} (starting ${timeUntil}). Tap to view the calendar.`,
+        data: { type: 'event_added', eventId: event.id, url: '/calendar' },
+        tag: `event-${event.id}`,
+        renotify: true,
+        requireInteraction: true,
+      }).catch(err => console.error('Push notification failed:', err.message));
+
+      // Reminder-style push too, so it also lands in the reminders thread
       sendMeetingReminderNotification(userId, {
         meetingId: event.id,
         title: event.title,
-        location: event.location || 'TBD',
+        location: where,
         timeUntil: timeUntil,
       }).catch(err => console.error('Push notification failed:', err.message));
     });
+
+    scheduleEventFollowups(event);
   } catch (err) {
     console.error('Failed to send push notifications for approved event:', err.message);
+  }
+}
+
+// Human-readable when-string for pushes: "today at 4:00 PM", "tomorrow at 12:00 PM"
+function fmtEventWhen(dateStr) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return String(dateStr);
+  const now = new Date();
+  const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const isTomorrow = d.getFullYear() === tomorrow.getFullYear() &&
+                     d.getMonth() === tomorrow.getMonth() &&
+                     d.getDate() === tomorrow.getDate();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (isSameDayLocal(d, now)) return `today at ${time}`;
+  if (isTomorrow) return `tomorrow at ${time}`;
+  return `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} at ${time}`;
+}
+
+function isSameDayLocal(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// Follow-up nudges after an event lands on the calendar: a morning-of heads-up
+// and an "almost time" push ~55 min before start (ahead of the scheduler's
+// hourly window). In-process timers — best-effort, but they make pushes land
+// far more often than the old announce-once-then-silence behavior.
+const eventFollowupTimers = new Map(); // eventId -> [timer, …]
+function scheduleEventFollowups(event) {
+  try {
+    const start = new Date(event.date);
+    if (Number.isNaN(start.getTime())) return;
+
+    (eventFollowupTimers.get(event.id) || []).forEach(clearTimeout);
+    const timers = [];
+    eventFollowupTimers.set(event.id, timers);
+
+    const broadcast = (payload) => {
+      getSubscribedUserIds().forEach(userId => {
+        sendPushNotification(userId, payload)
+          .catch(err => console.error('Push notification failed:', err.message));
+      });
+    };
+
+    const queue = (when, build) => {
+      const delay = when - Date.now();
+      if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return; // skip stale / far-out
+      timers.push(setTimeout(() => broadcast(build()), delay));
+    };
+
+    // Morning-of reminder (8:00 AM local on the event day, if still ahead)
+    const morning = new Date(start); morning.setHours(8, 0, 0, 0);
+    queue(morning, () => ({
+      title: `\u{1F3C1} Today: ${event.title}`,
+      body: `Starts ${fmtEventWhen(event.date).split(' at ')[1] ? 'at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'today'} \u2014 ${event.location || 'TBD'}. See you there!`,
+      data: { type: 'event_reminder', eventId: event.id, url: '/calendar' },
+      tag: `event-${event.id}-morning`,
+      requireInteraction: true,
+    }));
+
+    // Heads-up ~55 minutes before start
+    queue(new Date(start.getTime() - 55 * 60 * 1000), () => ({
+      title: `\u23F0 Almost time: ${event.title}`,
+      body: `Starting ${getTimeUntilString(start)} at ${event.location || 'TBD'}. Head over!`,
+      data: { type: 'event_reminder', eventId: event.id, url: '/calendar' },
+      tag: `event-${event.id}-soon`,
+      renotify: true,
+      requireInteraction: true,
+    }));
+  } catch (err) {
+    console.error('Failed to schedule event follow-ups:', err.message);
   }
 }
 
