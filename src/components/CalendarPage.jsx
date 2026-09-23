@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, Plus, ThumbsUp, ThumbsDown, Trash2, Vote, X as XIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, Plus, ThumbsUp, ThumbsDown, Trash2, Vote, X as XIcon, CheckCircle2 } from 'lucide-react';
 import EventDialog from './EventDialog';
 
 const fmtProposalDate = (d) => {
@@ -26,6 +26,7 @@ export default function CalendarPage({ session, setCurrentView }) {
       if (response.ok) {
         const data = await response.json();
         setEvents(data.filter(e => e.status === 'approved'));
+        // 'rejected' proposals are hidden from everyone; only pending ones are votable
         const pending = data.filter(e => e.status === 'pending');
         setProposals(pending);
 
@@ -91,6 +92,28 @@ export default function CalendarPage({ session, setCurrentView }) {
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         alert(d.error || 'Could not delete event');
+        return;
+      }
+      await loadEvents();
+    } catch {
+      /* ignore */
+    } finally {
+      setBusyEventId(null);
+    }
+  };
+
+  // ── admin overrides: force-approve / reject a proposal without voting ─────
+  const handleAdminDecision = async (event, decision) => {
+    if (decision === 'reject' && !window.confirm(`Reject "${event.title}"? It will be removed from the proposals.`)) return;
+    setBusyEventId(event.id);
+    try {
+      const res = await fetch(`/api/events/${event.id}/${decision}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${session.token}` },
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || d.message || `Could not ${decision} event`);
         return;
       }
       await loadEvents();
@@ -314,7 +337,8 @@ export default function CalendarPage({ session, setCurrentView }) {
             </div>
             <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
               New event proposals land here — once a majority votes 👍, the event moves onto the calendar
-              automatically.{!session && ' Sign in to vote.'}
+              automatically. Admins can also approve or reject proposals directly, and add events
+              straight to the calendar without a vote.{!session && ' Sign in to vote.'}
             </p>
 
             <div className="space-y-3">
@@ -341,10 +365,16 @@ export default function CalendarPage({ session, setCurrentView }) {
                           <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
                             {ev.title}
                           </h3>
-                          {isMine && (
+                          {isMine && !session.admin && (
                             <span className="text-xs px-1.5 py-0.5 rounded"
                                   style={{ background: 'rgba(255,199,44,0.12)', color: '#a16207', border: '1px solid rgba(255,199,44,0.32)' }}>
                               yours
+                            </span>
+                          )}
+                          {isMine && session.admin && (
+                            <span className="text-xs px-1.5 py-0.5 rounded"
+                                  style={{ background: 'rgba(255,199,44,0.12)', color: '#a16207', border: '1px solid rgba(255,199,44,0.32)' }}>
+                              yours · admin
                             </span>
                           )}
                         </div>
@@ -373,8 +403,8 @@ export default function CalendarPage({ session, setCurrentView }) {
                       </div>
 
                       {/* Vote controls */}
-                      <div className="shrink-0 flex flex-row sm:flex-col items-center sm:items-end gap-2">
-                        <div className="flex items-center gap-2">
+                      <div className="shrink-0 flex flex-col sm:items-end gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <button
                             onClick={() => handleVote(ev, 1)}
                             disabled={busy}
@@ -399,6 +429,39 @@ export default function CalendarPage({ session, setCurrentView }) {
                             }}>
                             <ThumbsDown className="w-3.5 h-3.5" /> {no}
                           </button>
+                          {/* Admin overrides — skip the vote entirely */}
+                          {session?.admin && (
+                            <>
+                              <button
+                                onClick={() => handleAdminDecision(ev, 'approve')}
+                                disabled={busy}
+                                title="Approve now (admin — no voting required)"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                                style={{
+                                  background: 'rgba(34,197,94,0.12)',
+                                  color: '#166534',
+                                  border: '1px solid rgba(34,197,94,0.4)',
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(34,197,94,0.22)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(34,197,94,0.12)'; }}>
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                              </button>
+                              <button
+                                onClick={() => handleAdminDecision(ev, 'reject')}
+                                disabled={busy}
+                                title="Reject this proposal (admin — no voting required)"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+                                style={{
+                                  background: 'rgba(239,68,68,0.1)',
+                                  color: '#dc2626',
+                                  border: '1px solid rgba(239,68,68,0.35)',
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.18)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; }}>
+                                <XIcon className="w-3.5 h-3.5" /> Reject
+                              </button>
+                            </>
+                          )}
                           {canDelete && (
                             <button
                               onClick={() => handleDeleteEvent(ev)}
@@ -414,7 +477,9 @@ export default function CalendarPage({ session, setCurrentView }) {
                         </div>
                         <p className="text-xs" style={{ color: 'var(--text-subtle)' }}>
                           {total === 0
-                            ? 'no votes yet'
+                            ? session?.admin
+                              ? 'no votes yet — you can approve or reject directly'
+                              : 'no votes yet'
                             : needed > 0
                               ? `needs ${needed} more 👍 for majority`
                               : 'majority reached — approving…'}
@@ -433,15 +498,15 @@ export default function CalendarPage({ session, setCurrentView }) {
           <div className="p-4 sm:p-6 rounded-xl"
                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
             <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-              Wednesday Lunch Meeting
+              Tuesday Lunch Meeting
             </h3>
             <p className="text-sm text-gray-400 mb-4">
-              Join us during lunch hour in Room F1 for our weekly Wednesday meeting. All members are welcome!
+              Join us during lunch hour in Room F1 for our weekly Tuesday meeting. All members are welcome!
             </p>
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-sm text-gray-400">
                 <CalendarIcon className="w-4 h-4" />
-                <span>Wednesdays</span>
+                <span>Tuesdays</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-400">
                 <Clock className="w-4 h-4" />
@@ -457,7 +522,7 @@ export default function CalendarPage({ session, setCurrentView }) {
           <div className="p-4 sm:p-6 rounded-xl"
                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
             <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-              Thursday Afternoon Meeting
+              Wednesday After-School Meeting
             </h3>
             <p className="text-sm text-gray-400 mb-4">
               Extended meeting with robotics shop access from 4:00 PM to 6:00 PM in Room C5.
@@ -465,7 +530,7 @@ export default function CalendarPage({ session, setCurrentView }) {
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-sm text-gray-400">
                 <CalendarIcon className="w-4 h-4" />
-                <span>Thursdays</span>
+                <span>Wednesdays</span>
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-400">
                 <Clock className="w-4 h-4" />
