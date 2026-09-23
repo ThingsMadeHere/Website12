@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Send, Hash, Plus, Users, Menu, X, Trash2, Ban, Bell, BellOff, Settings } from 'lucide-react';
 import TagPill from './TagPill';
 import NotificationSettings from './NotificationSettings';
@@ -154,6 +154,11 @@ export default function MessageBoard({ session, refreshSession }) {
   const [notificationSettings, setNotificationSettings] = useState('all'); // 'all' | 'mentions_only' | 'none'
   const [showSettings, setShowSettings] = useState(false);
 
+  // ── @-mention autocomplete state ────────────────────────────────────────
+  const [mentionUsers, setMentionUsers] = useState([]);   // full roster from /api/users/mentionable
+  const [mentionQuery, setMentionQuery] = useState(null); // null = closed; string = text after '@'
+  const [mentionIndex, setMentionIndex] = useState(0);    // highlighted row in the popup
+
   const lastIdRef    = useRef(0);
   const lastDelIdRef = useRef(0); // deletion-tombstone cursor
   const endRef       = useRef(null);
@@ -169,6 +174,58 @@ export default function MessageBoard({ session, refreshSession }) {
     const t = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(t);
   }, []);
+
+  // ── @-mention autocomplete ──────────────────────────────────────────────
+  // Fetch the roster of verified members once (auth required server-side).
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/users/mentionable', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(list => { if (!cancelled && Array.isArray(list)) setMentionUsers(list); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // Given the current input + caret position, find an in-progress "@query" token.
+  const getMentionToken = useCallback((value, caret) => {
+    const upto = value.slice(0, caret);
+    const m = /(^|\s)@([\w.-]*)$/.exec(upto);
+    return m ? { query: m[2], start: upto.length - m[2].length - 1, end: caret } : null;
+  }, []);
+
+  // Live candidates for the popup (max 8, case-insensitive prefix match).
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery == null) return [];
+    const q = mentionQuery.toLowerCase();
+    const exact = u => u.username.toLowerCase().startsWith(q);
+    return [...mentionUsers.filter(exact),
+            ...mentionUsers.filter(u => !exact(u) && u.username.toLowerCase().includes(q))]
+      .slice(0, 8);
+  }, [mentionQuery, mentionUsers]);
+
+  const handleInputChange = useCallback((e) => {
+    setInput(e.target.value);
+    const tok = getMentionToken(e.target.value, e.target.selectionStart ?? e.target.value.length);
+    setMentionQuery(tok ? tok.query : null);
+    setMentionIndex(0);
+  }, [getMentionToken]);
+
+  // Insert the chosen username, replacing the partial "@query" text.
+  const applyMention = useCallback((username) => {
+    const el = inputRef.current;
+    const caret = el ? el.selectionStart : input.length;
+    const tok = getMentionToken(input, caret);
+    if (!tok) { setMentionQuery(null); return; }
+    const next = input.slice(0, tok.start) + '@' + username + ' ' + input.slice(tok.end);
+    setInput(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      const pos = tok.start + username.length + 2;
+      try { el.setSelectionRange(pos, pos); } catch { /* Safari quirks */ }
+    });
+  }, [input, getMentionToken]);
 
   // Load notification settings from server
   useEffect(() => {
@@ -667,15 +724,56 @@ export default function MessageBoard({ session, refreshSession }) {
             </div>
           </div>
         ) : (
-        <div className="px-3 py-2.5 sm:px-5 sm:py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="relative px-3 py-2.5 sm:px-5 sm:py-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
+          {/* @-mention autocomplete popup (anchored above the input) */}
+          {mentionQuery != null && mentionMatches.length > 0 && (
+            <ul role="listbox" aria-label="Mention suggestions"
+                className="absolute left-3 right-3 sm:left-5 sm:right-auto w-72 max-w-full rounded-lg overflow-hidden shadow-lg z-20"
+                style={{ bottom: '100%', background: 'var(--bg-elevated)', border: '1px solid var(--border-light)' }}>
+              {mentionMatches.map((u, i) => (
+                <li key={u.username} role="option" aria-selected={i === mentionIndex}>
+                  <button type="button"
+                    onMouseDown={e => { e.preventDefault(); applyMention(u.username); }}
+                    onMouseEnter={() => setMentionIndex(i)}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
+                    style={{ background: i === mentionIndex ? 'var(--bg-overlay)' : 'transparent' }}>
+                    <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                      @{u.username}
+                    </span>
+                    {u.name && u.name !== u.username && (
+                      <span className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{u.name}</span>
+                    )}
+                    {u.admin && <span className="ml-auto text-[10px] shrink-0" style={{ color: '#a16207' }}>ADMIN</span>}
+                  </button>
+                </li>
+              ))}
+              <li className="px-3 py-1 text-[10px]" style={{ color: 'var(--text-subtle)', borderTop: '1px solid var(--border)' }}>
+                ↑↓ navigate · Tab/Enter insert · Esc close
+              </li>
+            </ul>
+          )}
           <form onSubmit={handleSend} className="flex gap-2">
             <input
               ref={inputRef}
               type="text"
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={handleInputChange}
+              onKeyDown={(e) => {
+                if (mentionQuery == null || mentionMatches.length === 0) return;
+                if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex(i => (i + 1) % mentionMatches.length); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex(i => (i - 1 + mentionMatches.length) % mentionMatches.length); }
+                else if (e.key === 'Tab' || (e.key === 'Enter' && mentionQuery !== '')) {
+                  e.preventDefault();
+                  applyMention(mentionMatches[mentionIndex]?.username ?? mentionMatches[0].username);
+                }
+                else if (e.key === 'Escape') { e.preventDefault(); setMentionQuery(null); }
+              }}
+              onClick={(e) => {
+                const tok = getMentionToken(e.target.value, e.target.selectionStart ?? 0);
+                setMentionQuery(tok ? tok.query : null);
+              }}
               maxLength={2000}
-              placeholder={`Message #${activeChannel?.name || '…'}`}
+              placeholder={`Message #${activeChannel?.name || '…'}  (type @ to mention)`}
               className="flex-1 min-w-0 rounded-lg px-3 sm:px-4 py-2.5 text-sm outline-none transition-colors"
               style={{
                 background: 'var(--bg-elevated)',
