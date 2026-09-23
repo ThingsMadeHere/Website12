@@ -13,50 +13,108 @@ if (!vapidPublicKey || !vapidPrivateKey) {
   console.log('✅ VAPID keys configured for push notifications');
 }
 
-// Store push subscriptions in memory (userId -> subscription)
+// Push subscriptions live in SQLite (push_subscriptions table) so they
+// survive server restarts — previously they were memory-only, which meant
+// reminders silently stopped working after every deploy until each user
+// reloaded the site. Each user may have several subscriptions (one per
+// device/browser); all of them receive pushes.
+let dbRef = null;
+function attachDb(db) {
+  dbRef = db;
+  try { db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(''); } catch { /* ignore */ }
+}
+
+// Legacy in-memory map kept only so old callers don't crash; no longer read.
 const subscriptions = new Map();
 
 /**
- * Register a push subscription for a user
+ * Register a push subscription for a user (dedupes by endpoint across devices)
  */
 function registerSubscription(userId, subscription) {
-  subscriptions.set(userId, subscription);
+  const endpoint = String((subscription || {}).endpoint || '');
+  if (!endpoint) return;
+  if (dbRef) {
+    // Re-adding an endpoint that belongs to another account (e.g. shared
+    // browser profile) would misroute notifications — move it instead.
+    dbRef.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+    dbRef.prepare(
+      `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`
+    ).run(userId, endpoint, subscription.keys?.p256dh || '', subscription.keys?.auth || '');
+  } else {
+    subscriptions.set(userId, subscription); // fallback: no DB attached yet
+  }
   console.log(`📱 Registered push subscription for user ${userId}`);
 }
 
 /**
- * Remove a push subscription for a user
+ * Remove one subscription (by endpoint), or all of a user's subscriptions
+ * when called with just a userId (legacy signature).
  */
-function removeSubscription(userId) {
-  subscriptions.delete(userId);
-  console.log(`📱 Removed push subscription for user ${userId}`);
+function removeSubscription(userId, endpoint) {
+  if (dbRef && endpoint) {
+    dbRef.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(String(endpoint));
+  } else if (dbRef) {
+    dbRef.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(userId);
+  } else {
+    subscriptions.delete(userId);
+  }
+  console.log(`📱 Removed push subscription(s) for user ${userId}`);
 }
 
 /**
- * Get subscription for a user
+ * Get the first subscription for a user (legacy API)
  */
 function getSubscription(userId) {
+  if (dbRef) {
+    const row = dbRef.prepare('SELECT * FROM push_subscriptions WHERE user_id = ? LIMIT 1').get(userId);
+    return row ? subRowToPayload(row) : null;
+  }
   return subscriptions.get(userId) || null;
 }
 
-/**
- * Get all subscribed user IDs
- */
-function getSubscribedUserIds() {
-  return Array.from(subscriptions.keys());
+function subRowToPayload(row) {
+  return {
+    endpoint: row.endpoint,
+    keys: { p256dh: row.p256dh, auth: row.auth },
+  };
 }
 
 /**
- * Send a push notification to a specific user
+ * Get all subscribed user IDs (deduped)
+ */
+function getSubscribedUserIds() {
+  if (dbRef) {
+    return dbRef.prepare('SELECT DISTINCT user_id FROM push_subscriptions').all().map(r => r.user_id);
+  }
+  return Array.from(subscriptions.keys());
+}
+
+// All stored subscription payloads for one user (one per device/browser).
+function subsForUser(userId) {
+  if (dbRef) {
+    return dbRef.prepare('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId).map(subRowToPayload);
+  }
+  const s = subscriptions.get(userId);
+  return s ? [s] : [];
+}
+
+/**
+ * Send a push notification to every device a user has registered.
  */
 async function sendPushNotification(userId, payload) {
-  const subscription = subscriptions.get(userId);
-  
-  if (!subscription) {
+  const subs = subsForUser(userId);
+
+  if (subs.length === 0) {
     console.log(`❌ No subscription found for user ${userId}`);
     return false;
   }
 
+  const results = await Promise.all(subs.map(sub => deliver(sub, payload, userId)));
+  return results.some(Boolean);
+}
+
+async function deliver(subscription, payload, userId) {
   try {
     const notificationPayload = JSON.stringify({
       title: payload.title,
@@ -65,7 +123,9 @@ async function sendPushNotification(userId, payload) {
       badge: '/icon.svg',
       data: payload.data || {},
       timestamp: Date.now(),
-      vibrate: payload.vibrate || [200, 100, 200],
+      tag: payload.tag,
+      renotify: payload.renotify || undefined,
+      vibrate: payload.vibrate || [200, 100, 200, 100, 200],
       requireInteraction: payload.requireInteraction !== false,
       silent: payload.silent || false
     });
@@ -75,13 +135,18 @@ async function sendPushNotification(userId, payload) {
     return true;
   } catch (error) {
     console.error(`❌ Failed to send push notification to user ${userId}:`, error.message);
-    
-    // Remove invalid subscriptions (e.g., user revoked permission)
+
+    // Remove invalid/expired subscriptions (user revoked permission, endpoint
+    // rotated, browser wiped) so the store doesn't accumulate garbage.
     if (error.statusCode === 410 || error.statusCode === 404) {
-      console.log(`🗑️  Removing invalid subscription for user ${userId}`);
-      subscriptions.delete(userId);
+      console.log(`🗑️  Removing expired subscription for user ${userId}`);
+      if (dbRef && subscription.endpoint) {
+        dbRef.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(subscription.endpoint);
+      } else {
+        subscriptions.delete(userId);
+      }
     }
-    
+
     return false;
   }
 }
@@ -139,6 +204,7 @@ async function sendMeetingReminderNotification(userId, meetingData) {
 }
 
 module.exports = {
+  attachDb,
   registerSubscription,
   removeSubscription,
   getSubscription,

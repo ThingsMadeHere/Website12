@@ -90,6 +90,18 @@ async function initDb() {
       UNIQUE(event_id, user_id)
     );
 
+    -- Web-push subscriptions. Persisted (not in-memory) so reminders keep
+    -- working across server restarts; one row per device/browser per user.
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id          INTEGER     PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint    TEXT        NOT NULL UNIQUE,
+      p256dh      TEXT        NOT NULL DEFAULT '',
+      auth        TEXT        NOT NULL DEFAULT '',
+      created_at  TEXT        NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
+
     -- Tombstones for deleted messages so polling clients can remove them live
     CREATE TABLE IF NOT EXISTS message_deletions (
       id          INTEGER     PRIMARY KEY AUTOINCREMENT,
