@@ -110,3 +110,49 @@ re-enable notifications on their devices afterwards.
 4. **Port Conflicts**: If you previously ran `node index.js` by hand, kill it
    first (`pkill -f "node index.js"`) or PM2's child will crash-loop with
    `EADDRINUSE`.
+
+## Troubleshooting
+
+### `ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION` mismatch (better-sqlite3)
+
+The native SQLite binding was compiled against a different Node version than
+the one actually running the process. This happens when PM2's `interpreter`
+points at a Node binary that isn't the one your shell uses (e.g.
+`/usr/bin/node` while nvm/others installs v26 elsewhere), so `npm rebuild`
+in your shell never fixes what PM2 runs. Fix: keep `interpreter: 'node'` in
+`ecosystem.config.cjs` (resolves from PATH), then:
+
+```bash
+pm2 delete mchs-api
+cd api && npm rebuild better-sqlite3 && cd ..
+pm2 start ecosystem.config.cjs && pm2 save
+```
+
+### `EADDRINUSE: address already in use :::3001` — a Docker container owns the port
+
+This repo also ships a Docker Compose stack whose API service is literally
+named `mchs-api` and publishes host port **3001**. If that container is up,
+PM2 can *never* bind 3001 and crash-loops every second. Run only ONE runtime:
+
+```bash
+docker ps --filter name=mchs-api          # is the container holding :3001?
+lsof -i :3001                             # docker-proxy = Docker owns it
+# Option A — keep Docker, drop PM2:
+pm2 delete mchs-api && pm2 save
+# Option B — keep PM2, stop Docker:
+docker compose stop api                   # (or down the whole stack)
+```
+
+If both must coexist temporarily, give PM2 a different port:
+`PORT=3002 pm2 start ecosystem.config.cjs` and point the nginx/Caddy `/api`
+proxy at 3002.
+
+### `[PM2][ERROR] Process with pid NNNN already exists` / `Cannot read properties of undefined (reading 'pm2_env')`
+
+Stale PM2 daemon state after repeated crash-loops. Reset it:
+
+```bash
+pm2 kill        # kills the daemon (does NOT touch Docker containers)
+pm2 start ecosystem.config.cjs
+pm2 save
+```
