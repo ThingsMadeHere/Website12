@@ -5,6 +5,8 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const cors    = require('cors');
 const crypto  = require('crypto');
+const fs      = require('fs');
+const path    = require('path');
 const { db, initDb, ADMIN_USERNAMES, ensureRecurringMeetings } = require('./db');
 const { sendMail } = require('./mailer');
 const {
@@ -1093,7 +1095,64 @@ app.delete('/api/messages/:id', requireAuth, (req, res) => {
   res.json({ ok: true, id: msg.id, channelId: msg.channel_id });
 });
 
-// ── calendar events (unchanged contract) ─────────────────────────────────────
+// ── calendar events ──────────────────────────────────────────────────────────
+// Members PROPOSE events (status 'pending') which move onto the calendar once
+// a majority votes 👍. Admins can PUSH events straight onto the calendar
+// (status 'approved', no voting required), approve or reject any proposal,
+// and delete any event.
+
+const EVENT_TYPES = ['meeting', 'event', 'workshop', 'competition'];
+
+function eventRow(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description || '',
+    date: row.date,
+    location: row.location || '',
+    type: row.type || 'meeting',
+    status: row.status || 'pending',
+    isMeeting: (row.type || 'meeting') === 'meeting',
+    proposedBy: row.proposed_by != null && row.proposed_by !== '' ? Number(row.proposed_by) : null,
+    proposerName: row.proposer_name || null,
+  };
+}
+
+// Notify everyone with push notifications that an event landed on the calendar
+function notifyEventApproved(event) {
+  try {
+    const subscribedUsers = getSubscribedUserIds();
+    if (subscribedUsers.length === 0) return;
+    const timeUntil = getTimeUntilString(new Date(event.date));
+    subscribedUsers.forEach(userId => {
+      sendMeetingReminderNotification(userId, {
+        meetingId: event.id,
+        title: event.title,
+        location: event.location || 'TBD',
+        timeUntil: timeUntil,
+      }).catch(err => console.error('Push notification failed:', err.message));
+    });
+  } catch (err) {
+    console.error('Failed to send push notifications for approved event:', err.message);
+  }
+}
+
+// Helper function to get time until string
+function getTimeUntilString(date) {
+  const now = new Date();
+  const diff = date - now;
+
+  if (diff <= 0) return 'starting soon';
+
+  const minutes = Math.floor(diff / (1000 * 60));
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) return `in ${days} day${days > 1 ? 's' : ''}`;
+  if (hours > 0) return `in ${hours} hour${hours > 1 ? 's' : ''}`;
+  if (minutes > 0) return `in ${minutes} minute${minutes > 1 ? 's' : ''}`;
+  return 'starting soon';
+}
 
 // GET /api/events — all calendar events (approved + pending proposals)
 app.get('/api/events', (_, res) => {
@@ -1106,50 +1165,39 @@ app.get('/api/events', (_, res) => {
          ORDER BY e.date ASC`
       )
       .all();
-    const events = rows.map(row => ({
-      id: row.id,
-      title: row.title,
-      description: row.description || '',
-      date: row.date,
-      location: row.location || '',
-      type: row.type || 'meeting',
-      status: row.status || 'pending',
-      isMeeting: row.type === 'meeting',
-      proposedBy: row.proposed_by != null && row.proposed_by !== '' ? Number(row.proposed_by) : null,
-      proposerName: row.proposer_name || null,
-    }));
-    res.json(events);
+    res.json(rows.map(eventRow));
   } catch (err) {
     console.error('Error fetching events:', err);
     res.status(500).json({ error: 'Failed to fetch events' });
   }
 });
 
-// POST /api/events — propose a new calendar event
+// POST /api/events — create a calendar event.
+// Members propose (status 'pending' → goes to the voting panel); admins may
+// pass { push: true } to skip voting and land it on the calendar immediately.
 app.post('/api/events', requireAuth, blockIfTimedOut, (req, res) => {
-  const { title, description, date, location, type } = req.body || {};
+  const { title, description, date, location, type, push } = req.body || {};
 
   if (!title || !date) return res.status(400).json({ error: 'Title and date are required' });
+
+  const evType = type || 'meeting';
+  if (!EVENT_TYPES.includes(evType))
+    return res.status(400).json({ error: 'type must be meeting, event, workshop, or competition' });
+
+  // Only admins may bypass the vote workflow.
+  const status = (push && req.user.admin) ? 'approved' : 'pending';
 
   try {
     const info = db
       .prepare(
-        `INSERT INTO calendar_events (title, description, date, location, type, proposed_by)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO calendar_events (title, description, date, location, type, status, proposed_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(title, description || '', date, location || '', type || 'meeting', String(req.user.id));
+      .run(String(title).trim(), description || '', date, location || '', evType, status, String(req.user.id));
 
     const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(info.lastInsertRowid);
-    res.json({
-      id: event.id,
-      title: event.title,
-      description: event.description || '',
-      date: event.date,
-      location: event.location || '',
-      type: event.type || 'meeting',
-      status: event.status || 'pending',
-      isMeeting: event.type === 'meeting',
-    });
+    if (status === 'approved') notifyEventApproved(event);
+    res.json(eventRow(event));
   } catch (err) {
     console.error('Error creating event:', err);
     res.status(500).json({ error: 'Failed to create event' });
@@ -1223,9 +1271,21 @@ app.post('/api/events/:id/vote', requireAuth, blockIfTimedOut, (req, res) => {
   }
 });
 
-// PUT /api/events/:id/approve — approve if majority voted yes
+// PUT /api/events/:id/approve — put a proposal on the calendar.
+// Anyone may call it, but it only succeeds once a majority voted yes; admins
+// can force-approve any pending proposal (their word is enough — no votes
+// needed).
 app.put('/api/events/:id/approve', requireAuth, (req, res) => {
   try {
+    const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (event.status === 'approved') {
+      return res.json({ success: true, approved: true, message: 'Event is already on the calendar' });
+    }
+    if (event.status !== 'pending') {
+      return res.status(400).json({ success: false, approved: false, error: `Event was ${event.status}` });
+    }
+
     const totals = db
       .prepare(
         `SELECT
@@ -1239,32 +1299,10 @@ app.put('/api/events/:id/approve', requireAuth, (req, res) => {
     const yesVotes   = totals.yes_votes || 0;
     const majority   = totalVotes > 0 ? Math.floor(totalVotes / 2) + 1 : 0;
 
-    if (yesVotes >= majority && totalVotes > 0) {
+    // Admin decision counts as approval on its own; members need a vote majority.
+    if (req.user.admin || (totalVotes > 0 && yesVotes >= majority)) {
       db.prepare(`UPDATE calendar_events SET status = 'approved' WHERE id = ?`).run(req.params.id);
-      
-      // Send push notification for approved event
-      try {
-        const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id);
-        if (event) {
-          const subscribedUsers = getSubscribedUserIds();
-          if (subscribedUsers.length > 0) {
-            const eventDate = new Date(event.date);
-            const timeUntil = getTimeUntilString(eventDate);
-            
-            subscribedUsers.forEach(userId => {
-              sendMeetingReminderNotification(userId, {
-                meetingId: event.id,
-                title: event.title,
-                location: event.location || 'TBD',
-                timeUntil: timeUntil
-              }).catch(err => console.error('Push notification failed:', err.message));
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Failed to send push notifications for approved event:', err.message);
-      }
-      
+      notifyEventApproved(event);
       res.json({ success: true, approved: true, message: 'Event approved and added to calendar' });
     } else {
       res.status(400).json({
@@ -1279,39 +1317,23 @@ app.put('/api/events/:id/approve', requireAuth, (req, res) => {
   }
 });
 
-// Helper function to get time until string
-function getTimeUntilString(date) {
-  const now = new Date();
-  const diff = date - now;
-  
-  if (diff <= 0) return 'starting soon';
-  
-  const minutes = Math.floor(diff / (1000 * 60));
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  
-  if (days > 0) return `in ${days} day${days > 1 ? 's' : ''}`;
-  if (hours > 0) return `in ${hours} hour${hours > 1 ? 's' : ''}`;
-  if (minutes > 0) return `in ${minutes} minute${minutes > 1 ? 's' : ''}`;
-  return 'starting soon';
-}
+// PUT /api/events/:id/reject  (admin) — deny a pending proposal outright,
+// without waiting for (or requiring) a vote majority.
+app.put('/api/events/:id/reject', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    if (event.status !== 'pending')
+      return res.status(400).json({ error: `Only pending proposals can be rejected (this one is ${event.status})` });
 
-// Helper function to get time until string
-function getTimeUntilString(date) {
-  const now = new Date();
-  const diff = date - now;
-  
-  if (diff <= 0) return 'starting soon';
-  
-  const minutes = Math.floor(diff / (1000 * 60));
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  
-  if (days > 0) return `in ${days} day${days > 1 ? 's' : ''}`;
-  if (hours > 0) return `in ${hours} hour${hours > 1 ? 's' : ''}`;
-  if (minutes > 0) return `in ${minutes} minute${minutes > 1 ? 's' : ''}`;
-  return 'starting soon';
-}
+    db.prepare(`UPDATE calendar_events SET status = 'rejected' WHERE id = ?`).run(req.params.id);
+    console.log(`Event ${req.params.id} ("${event.title}") rejected by ${req.user.username}`);
+    res.json({ success: true, rejected: true });
+  } catch (err) {
+    console.error('Error rejecting event:', err);
+    res.status(500).json({ error: 'Failed to reject event' });
+  }
+});
 
 // ── admin: member management ─────────────────────────────────────────────────
 // Powers the Admin panel: list members, create accounts, edit profile info &
@@ -1600,15 +1622,21 @@ function scheduleMeetingReminders() {
   setInterval(async () => {
     try {
       const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      // Event dates are stored as LOCAL wall-clock strings ('YYYY-MM-DD' or
+      // 'YYYY-MM-DDTHH:MM:SS'), so compare them against local time — using
+      // sqlUtc() here (as before) meant reminders effectively never fired.
+      const fmtLocal = (d) =>
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
       const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-      
-      // Get approved meetings in the next hour
+
+      // Get approved meetings starting within the next hour
       const rows = db.prepare(
-        `SELECT * FROM calendar_events 
-         WHERE status = 'approved' 
-         AND date >= ? 
+        `SELECT * FROM calendar_events
+         WHERE status = 'approved'
+         AND date >= ?
          AND date <= ?`
-      ).all(sqlUtc(now), sqlUtc(oneHourFromNow));
+      ).all(fmtLocal(now), fmtLocal(oneHourFromNow));
       
       for (const event of rows) {
         const eventDate = new Date(event.date);
