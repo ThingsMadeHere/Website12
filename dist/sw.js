@@ -1,7 +1,7 @@
 // Service Worker for push notifications
 // Handles incoming push notifications and notification clicks
 
-const CACHE_NAME = 'mchs-robotics-v1';
+const CACHE_NAME = 'mchs-robotics-v2';
 const ASSETS_TO_CACHE = ['/', '/index.html', '/manifest.json', '/notification-sound.mp3'];
 
 // Preload and cache the notification sound
