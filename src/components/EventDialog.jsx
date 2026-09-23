@@ -1,13 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Calendar as CalendarIcon, Clock, MapPin, Check, X as XIcon, Send } from 'lucide-react';
+import { X, Calendar as CalendarIcon, Clock, MapPin, Check, Send, Zap } from 'lucide-react';
 
 export default function EventDialog({ session, onClose, onEventCreated }) {
+  const isAdmin = !!session?.admin;
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('12:00');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState('meeting');
+  // Admins can skip the vote and push straight onto the calendar; members'
+  // events always go through voting.
+  const [pushMode, setPushMode] = useState(isAdmin);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
@@ -56,7 +60,8 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
           date: `${date}T${time}:00`,
           location: location || 'TBD',
           description,
-          type
+          type,
+          push: isAdmin && pushMode, // admins can skip voting entirely
         })
       });
       
@@ -77,6 +82,8 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
     }
   };
 
+  const pushed = isAdmin && pushMode;
+
   if (showSuccess) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 cursor-pointer"
@@ -89,11 +96,13 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
             <Check className="w-8 h-8 text-green-500" />
           </div>
           <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-            Event Proposed!
+            {pushed ? 'Event Added!' : 'Event Proposed!'}
           </h3>
           <p className="text-sm text-gray-400 mb-5 leading-relaxed">
-            Your proposal is waiting under <strong style={{ color: 'var(--text-primary)' }}>“Proposals awaiting votes”</strong> below
-            the calendar. Once a majority of the team votes 👍, it moves onto the calendar automatically.
+            {pushed
+              ? <>The event is on the <strong style={{ color: 'var(--text-primary)' }}>calendar</strong> now — no voting required.</>
+              : <>Your proposal is waiting under <strong style={{ color: 'var(--text-primary)' }}>“Proposals awaiting votes”</strong> below
+                 the calendar. Once a majority of the team votes 👍, it moves onto the calendar automatically.</>}
           </p>
           <button onClick={finishSuccess}
             className="px-5 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -114,7 +123,7 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-              Propose New Event
+              {isAdmin ? 'Add Calendar Event' : 'Propose New Event'}
             </h2>
             <button onClick={onClose}
                     className="p-2 rounded-lg transition-colors"
@@ -274,6 +283,32 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
               />
             </div>
 
+            {/* Admin: publish immediately, or send to voting */}
+            {isAdmin && (
+              <div className="p-3 rounded-lg" style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}>
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pushMode}
+                    onChange={e => setPushMode(e.target.checked)}
+                    disabled={isSubmitting}
+                    className="mt-0.5 w-4 h-4 shrink-0"
+                    style={{ accentColor: '#16a34a' }}
+                  />
+                  <span>
+                    <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                      <Zap className="w-3.5 h-3.5" style={{ color: '#a16207' }} />
+                      Publish directly — skip voting
+                    </span>
+                    <span className="block text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      As an admin you can put this event straight on the calendar. Uncheck to let the
+                      team vote on it first instead.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
+
             {/* Submit */}
             <div className="pt-2">
               <button
@@ -284,11 +319,16 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
                 onMouseEnter={e => { e.currentTarget.style.background = '#15803d'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = '#16a34a'; }}>
                 <Send className="w-4 h-4" />
-                {isSubmitting ? 'Submitting...' : 'Submit Event for Voting'}
+                {isSubmitting
+                  ? 'Submitting...'
+                  : pushed
+                    ? 'Add to Calendar Now'
+                    : 'Submit Event for Voting'}
               </button>
               <p className="mt-3 text-xs text-center" style={{ color: 'var(--text-subtle)' }}>
-                Submitted events will be posted to the team board for voting.
-                Events with majority approval will be added to the calendar.
+                {pushed
+                  ? 'This event will appear on the calendar immediately and members get a push notification.'
+                  : 'Submitted events will be posted for voting. Events with majority approval are added to the calendar.'}
               </p>
             </div>
           </form>
