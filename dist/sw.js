@@ -25,26 +25,44 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE)).then(() => {
       cacheNotificationSound();
-    })
+    }).then(() => self.skipWaiting()) // activate immediately, don't wait for tabs to close
   );
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches and take over open tabs
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) =>
       Promise.all(
         cacheNames.map((name) => name !== CACHE_NAME ? caches.delete(name) : null)
       )
-    )
+    ).then(() => self.clients.claim()).then(() => {
+      // Tell open app tabs a new version took over so they can reload once.
+      return self.clients.matchAll({ type: 'window' });
+    }).then((clientList) => {
+      clientList.forEach((c) => c.postMessage && c.postMessage({ type: 'SW_UPDATED' }));
+    })
   );
 });
 
-// Fetch event - serve from cache, fall back to network
+// Fetch event - network-first for navigations & hashed assets, cache fallback.
+// (Cache-first here previously pinned Chromebooks to stale bundles forever.)
 self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request).then((response) => response || fetch(event.request))
-  );
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/')) return; // never cache API traffic
+  if (event.request.mode === 'navigate' || url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((r) => r || caches.match('/index.html')))
+    );
+    return;
+  }
+  event.respondWith(caches.match(event.request).then((response) => response || fetch(event.request)));
 });
 
 /**
