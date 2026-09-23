@@ -113,6 +113,30 @@ services:
       - proxy
     logging: *default-logging
 
+  # ── Development Container for VS Code Remote SSH ─────────────────────────────
+  # Isolated Docker VM for coding/development to avoid permission errors
+  # Connect via VS Code Remote SSH extension on port 2223
+  dev-container:
+    build: ./docker/dev-container
+    container_name: jarvis-dev-workspace
+    restart: unless-stopped
+    ports:
+      - "2223:2222"   # SSH port for VS Code Remote SSH
+    volumes:
+      # Persist development workspaces
+      - dev-workspace:/home/appuser/workspace
+      # Mount SSH keys for authentication
+      - ./ssh-keys/authorized_keys:/home/appuser/.ssh/authorized_keys:rw
+      # SSH host keys (generated on first run)
+      - dev_ssh_host_keys:/etc/ssh
+    networks:
+      - proxy
+    environment:
+      # Allow connections from any IP (for local dev)
+      # Restrict in production by removing the port exposure
+      - ALLOW_ALL_CONNECTIONS=true
+    logging: *default-logging
+
   # ── Optional: Cloudflare Tunnel edge ────────────────────────────────────
   # Reaches the site without opening any inbound ports. Create a tunnel in
   # the Cloudflare Zero Trust dashboard (Networks → Tunnels), point its
@@ -143,3 +167,5 @@ volumes:
   ssh_host_keys:
   compiler_queue:
   compiler_output:
+  dev-workspace:
+  dev_ssh_host_keys:
