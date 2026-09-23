@@ -16,10 +16,20 @@ module.exports = {
       cwd: './api',
       // Run the real node entrypoint directly (not `npm start`, which
       // leaves orphaned child processes on restart/stop).
-      interpreter: '/usr/bin/node',
+      // NOTE: use 'node' (resolved from PATH), NOT a hardcoded path like
+      // '/usr/bin/node' — PM2 silently falls back to its own bundled Node
+      // when the path is wrong, which breaks native modules
+      // (better-sqlite3 ERR_DLOPEN_FAILED / NODE_MODULE_VERSION mismatch).
+      interpreter: 'node',
       env: {
         NODE_ENV: 'production',
-        PORT: 3001 // must match the /api/ proxy_pass port in nginx.conf
+        // The Docker Compose "api" service (container_name: mchs-api) also
+        // binds host port 3001. If that container is running, it owns 3001
+        // and this PM2 process crash-loops with EADDRINUSE. Check with:
+        //   docker ps --filter name=mchs-api
+        // Pick ONE runtime for the API: either Docker or PM2, never both.
+        // Override the port here (and in nginx/Caddy proxy config) if needed.
+        PORT: parseInt(process.env.PORT || '3001', 10)
       },
       autorestart: true,
       restart_delay: 1000,
