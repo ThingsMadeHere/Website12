@@ -13,7 +13,7 @@
 #   scripts/restore.sh <file> --force                # skip the confirmation
 #
 # Bare metal (no docker): falls back to running node inside api/ against
-# api/mchs.db — stop your api process first in that case.
+# JarvisData/database/mchs.db — stop your api process first in that case.
 # ─────────────────────────────────────────────────────────────────────────────
 set -Eeuo pipefail
 
@@ -72,17 +72,18 @@ if api_running; then
   ./scripts/healthcheck.sh --wait 60 || die "healthcheck failed after restore — the pre-restore safety backup is in backups/"
 else
   [[ -d api/node_modules/better-sqlite3 ]] || die "api container not running and api/node_modules missing — cannot restore"
-  log "bare-metal restore into api/mchs.db (make sure your api process is STOPPED)"
+  log "bare-metal restore into JarvisData/database/mchs.db (make sure your api process is STOPPED)"
   ( cd api && node -e '
     const Database = require("better-sqlite3");
     const fs = require("fs");
+    const path = require("path");
     const src = new Database(fs.realpathSync(process.argv[1]), { readonly: true });
-    const dest = process.env.DATABASE_PATH || "./mchs.db";
+    const dest = process.env.DATABASE_PATH || path.join(__dirname, "..", "JarvisData", "database", "mchs.db");
     src.backup(dest)
       .then(() => { src.close(); console.log("restored over", dest); })
       .catch((e) => { console.error("restore failed:", e.message); process.exit(1); });
   ' "$WORK/restore.db" )
-  rm -f api/mchs.db-wal api/mchs.db-shm
+  rm -f JarvisData/database/mchs.db-wal JarvisData/database/mchs.db-shm
 fi
 
 log "done ✅ — spot-check the site, then verify the member list in the Admin panel"

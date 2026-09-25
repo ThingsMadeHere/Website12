@@ -9,7 +9,7 @@
 #   scripts/set-admin.sh carterherrault off    # revoke admin
 #
 # Keeps users.admin and the 'admin' role tag in sync (same invariant the API
-# enforces). Works against the docker container, or bare-metal api/mchs.db.
+# enforces). Works against the docker container, or bare-metal JarvisData/database/mchs.db.
 # Note: usernames listed in api/db.js ADMIN_USERNAMES are re-promoted on every
 # server start — remove them there if a revocation should stick.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,8 +31,9 @@ fi
 
 SCRIPT='
   const Database = require("better-sqlite3");
+  const path = require("path");
   const [username, mode] = process.argv.slice(1);
-  const db = new Database(process.env.DATABASE_PATH || "./mchs.db");
+  const db = new Database(process.env.DATABASE_PATH || path.join(__dirname, "..", "JarvisData", "database", "mchs.db"));
   const user = db.prepare("SELECT id, username FROM users WHERE username = ?").get(username);
   if (!user) {
     console.error("no such user: " + username);
