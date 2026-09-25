@@ -158,7 +158,7 @@ layout differs.
 | Email provider keys | `api/.env` | git-ignored, `chmod 600`; backed up in the config bundle (§6) |
 | Admin email / public URL | `docker-compose.yml` → api environment | `PUBLIC_URL` must stay `https://mchsrobotics.dev` (approve/deny links) |
 | Auto-promoted admins | `api/db.js` → `ADMIN_USERNAMES` | promoted at every startup — keep in sync with reality |
-| DB location | volume `api_data` → `/app/data/mchs.db` | the repo's `api/mchs.db` is only a dev seed |
+| DB location | volume `api_data` → `/app/data/mchs.db` | the repo's `JarvisData/database/mchs.db` is only a dev seed |
 
 ## 6. Backup & restore protocol
 
