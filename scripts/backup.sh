@@ -54,23 +54,24 @@ if api_container_running; then
   ' "/app/data/backups/$DB_NAME"
   docker compose cp "api:/app/data/backups/$DB_NAME" "$BACKUP_DIR/$DB_NAME"
   docker compose exec -T api rm -f "/app/data/backups/$DB_NAME"
-elif [[ -f api/mchs.db ]] && [[ -d api/node_modules/better-sqlite3 ]]; then
+elif [[ -f JarvisData/database/mchs.db ]] && [[ -d api/node_modules/better-sqlite3 ]]; then
   # Bare-metal / dev fallback: back up the local database file directly.
-  log "container not running — backing up api/mchs.db directly"
+  log "container not running — backing up JarvisData/database/mchs.db directly"
   ( cd api && node -e '
     const Database = require("better-sqlite3");
+    const path = require("path");
     const dest = process.argv[1];
-    const db = new Database(process.env.DATABASE_PATH || "./mchs.db");
+    const db = new Database(process.env.DATABASE_PATH || path.join(__dirname, "..", "JarvisData", "database", "mchs.db"));
     db.backup(dest)
       .then(() => { db.close(); console.log("wrote", dest); })
       .catch((e) => { console.error("backup failed:", e.message); process.exit(1); });
   ' "mchs-$STAMP-$LABEL.db" )
   mv "api/mchs-$STAMP-$LABEL.db" "$BACKUP_DIR/$DB_NAME"
 else
-  if [[ ! -f api/mchs.db ]]; then
-    log "ERROR: no running api container and no local api/mchs.db — nothing to back up"
+  if [[ ! -f JarvisData/database/mchs.db ]]; then
+    log "ERROR: no running api container and no local JarvisData/database/mchs.db — nothing to back up"
   else
-    log "ERROR: api container not running and api/node_modules missing — cannot back up api/mchs.db safely (run 'cd api && npm install', or start the stack: docker compose up -d api)"
+    log "ERROR: api container not running and api/node_modules missing — cannot back up JarvisData/database/mchs.db safely (run 'cd api && npm install', or start the stack: docker compose up -d api)"
   fi
   exit 1
 fi
