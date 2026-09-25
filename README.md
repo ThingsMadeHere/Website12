@@ -91,7 +91,7 @@ Team portal for FRC Team 5728: a public team site plus a members-only area with 
 │   ├── auth.js          password hashing + session tokens
 │   ├── mailer.js        application emails (Resend API or SMTP)
 │   ├── db.js            SQLite schema + seeds + migrations
-│   └── mchs.db          the database (auto-created)
+│   └── ../JarvisData/database/mchs.db   the database (auto-created)
 ├── docker-compose.yml   build-frontend / api / web services
 ├── nginx.conf           serves dist/ + proxies /api
 └── Caddyfile            alternate reverse-proxy config
@@ -136,7 +136,7 @@ docker compose up -d api web             # web waits for api to be healthy
 - nginx (`mchs-web`) serves `dist/` on port **80** and proxies `/api/*` to
   `mchs-api:3001`; Cloudflare fronts the domain (see `CLOUDFLARE_SETUP.md`).
 - The database persists in the `api_data` Docker volume
-  (`DATABASE_PATH=/app/data/mchs.db`). The repo's `api/mchs.db` is only a
+  (`DATABASE_PATH=/app/data/mchs.db`). The repo's `JarvisData/database/mchs.db` is only a
   dev seed — production data lives in the volume and in `backups/`.
 - Pushes to `main` deploy automatically once CI passes
   (`.github/workflows/`), provided the deploy secrets are configured —

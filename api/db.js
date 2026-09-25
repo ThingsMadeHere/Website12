@@ -1,10 +1,15 @@
 const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
 // Usernames that always receive admin privileges (promoted on startup + registration).
 const ADMIN_USERNAMES = ['carter', 'carterherrault'];
 
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'mchs.db');
+// Default database location: <repo root>/JarvisData/database/mchs.db
+// (overridable with DATABASE_PATH, e.g. the Docker volume at /app/data).
+const defaultDbPath = path.join(__dirname, '..', 'JarvisData', 'database', 'mchs.db');
+const dbPath = process.env.DATABASE_PATH || defaultDbPath;
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
