@@ -17,6 +17,8 @@ set -Eeuo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP_DIR"
+# JarvisData lives OUTSIDE the repo, as a sibling directory (~/JarvisData).
+DATA_DIR="${DATA_DIR:-$APP_DIR/../JarvisData/database}"
 
 USERNAME="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
 MODE="${2:-on}"
@@ -31,9 +33,8 @@ fi
 
 SCRIPT='
   const Database = require("better-sqlite3");
-  const path = require("path");
-  const [username, mode] = process.argv.slice(1);
-  const db = new Database(process.env.DATABASE_PATH || path.join(__dirname, "..", "JarvisData", "database", "mchs.db"));
+  const [username, mode, dbFile] = process.argv.slice(1);
+  const db = new Database(process.env.DATABASE_PATH || dbFile);
   const user = db.prepare("SELECT id, username FROM users WHERE username = ?").get(username);
   if (!user) {
     console.error("no such user: " + username);
@@ -54,7 +55,7 @@ SCRIPT='
 if command -v docker >/dev/null 2>&1 && docker inspect -f '{{.State.Running}}' mchs-api 2>/dev/null | grep -q true; then
   docker compose exec -T api node -e "$SCRIPT" "$USERNAME" "$MODE"
 elif [[ -d api/node_modules/better-sqlite3 ]]; then
-  ( cd api && node -e "$SCRIPT" "$USERNAME" "$MODE" )
+  ( cd api && node -e "$SCRIPT" "$USERNAME" "$MODE" "$DATA_DIR/mchs.db" )
 else
   echo "ERROR: no running mchs-api container and no api/node_modules — deploy first (scripts/deploy.sh)" >&2
   exit 1
