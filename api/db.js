@@ -5,9 +5,10 @@ const path = require('path');
 // Usernames that always receive admin privileges (promoted on startup + registration).
 const ADMIN_USERNAMES = ['carter', 'carterherrault'];
 
-// Default database location: <repo root>/JarvisData/database/mchs.db
+// Default database location: <repo parent>/JarvisData/database/mchs.db
+// JarvisData sits OUTSIDE the repo, as a sibling directory: ~/JarvisData (~/Jarvis/../JarvisData)
 // (overridable with DATABASE_PATH, e.g. the Docker volume at /app/data).
-const defaultDbPath = path.join(__dirname, '..', 'JarvisData', 'database', 'mchs.db');
+const defaultDbPath = path.join(__dirname, '..', '..', 'JarvisData', 'database', 'mchs.db');
 const dbPath = process.env.DATABASE_PATH || defaultDbPath;
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
