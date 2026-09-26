@@ -20,7 +20,7 @@ const {
   SESSION_TTL_DAYS,
 } = require('./auth');
 const {
-  isConfigured: isGoogleConfigured, loginWithGoogle,
+  isConfigured: isGoogleConfigured, clientId: googleClientId, loginWithGoogle,
   listDeniedEmails, markDeniedReviewed,
 } = require('./googleAuth');
 const gcal = require('./googleCalendar');
@@ -801,7 +801,7 @@ app.get('/api/auth/config', (_, res) => {
     googleEnabled: configured,
     // Only expose the client ID when Google sign-in actually works, so the
     // frontend never renders a button that can only fail.
-    googleClientId: configured ? process.env.GOOGLE_CLIENT_ID : null,
+    googleClientId: configured ? googleClientId() : null,
   });
 });
 

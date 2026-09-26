@@ -26,9 +26,19 @@ const { OAuth2Client } = require('google-auth-library');
 const { createSession, sqlUtcPlus } = require('./auth');
 
 // One client for token verification; keeps no state of its own.
+// clientId() is defensive: trims whitespace and rejects placeholder values so a
+// half-pasted or commented example in .env can't make the server claim sign-in
+// is configured when it isn't.
+function cleanId(raw) {
+  const id = String(raw == null ? '' : raw).trim();
+  if (!id) return '';
+  if (/\.(?:apps\.googleusercontent\.com|googleapis\.com)$/i.test(id)) return id;
+  return ''; // anything else ("", "PASTE_YOUR...", "...") counts as unset
+}
+function clientId() { return cleanId(process.env.GOOGLE_CLIENT_ID); }
 let oauthClient = null;
 function getClient() {
-  const id = process.env.GOOGLE_CLIENT_ID || '';
+  const id = clientId();
   if (!id) return null;
   if (!oauthClient || oauthClient._clientId !== id) oauthClient = new OAuth2Client(id);
   return oauthClient;
@@ -52,7 +62,7 @@ function isAdminEmail(email) {
 }
 
 function isConfigured() {
-  return !!process.env.GOOGLE_CLIENT_ID;
+  return !!clientId();
 }
 
 // Schema migration (called from initDb): users gain identity columns, and a
@@ -105,7 +115,7 @@ async function verifyGoogleCredential(credential) {
   if (!credential || typeof credential !== 'string') return { error: 'Missing Google credential.' };
   let ticket;
   try {
-    ticket = await client.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
+    ticket = await client.verifyIdToken({ idToken: credential, audience: clientId() });
   } catch {
     return { error: 'That Google sign-in token could not be verified. Please try again.' };
   }
@@ -220,6 +230,7 @@ function markDeniedReviewed(id) {
 
 module.exports = {
   isConfigured,
+  clientId,
   isAdminEmail,
   migrateGoogle,
   verifyGoogleCredential,
