@@ -49,6 +49,11 @@ try {
 
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
+// Fail-fast-and-retry instead of "database is locked" when a PM2 graceful
+// reload overlaps the old and new process briefly:
+db.pragma('busy_timeout = 5000');
+// ON DELETE CASCADE clauses below only take effect with FK enforcement on.
+db.pragma('foreign_keys = ON');
 
 // Initialize schema on startup
 async function initDb() {
@@ -215,6 +220,17 @@ async function initDb() {
   `);
 
   // ── migrations for existing databases ────────────────────────────────────
+  // Sessions now carry an explicit expiry (JWT-backed sessions; a janitor
+  // cron prunes rows past this date).
+  const sessCols = db.prepare('PRAGMA table_info(sessions)').all().map(c => c.name);
+  if (!sessCols.includes('expires_at')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN expires_at TEXT`);
+    // Pre-JWT sessions never expired — give existing rows a fresh 30-day window.
+    db.exec(`UPDATE sessions SET expires_at = datetime('now', '+30 days') WHERE expires_at IS NULL`);
+    console.log('Migration: added sessions.expires_at column');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)');
+
   const userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
   if (!userCols.includes('admin')) {
     db.exec('ALTER TABLE users ADD COLUMN admin INTEGER NOT NULL DEFAULT 0');
@@ -280,6 +296,12 @@ async function initDb() {
     ['location',    'TEXT'],
     ['type',        `TEXT DEFAULT 'meeting'`],
     ['description', 'TEXT'],
+    // Google Calendar sync (api/googleCalendar.js): gcal_event_id links a
+    // portal event to its mirrored Google event; source marks events that
+    // were written DIRECTLY to Google by an admin/president and imported
+    // into the portal ('gcal-direct') instead of proposed in-app.
+    ['gcal_event_id', 'TEXT'],
+    ['source',        `TEXT NOT NULL DEFAULT 'portal'`],
   ];
   for (const [col, decl] of evMigrations) {
     if (!evCols.includes(col)) {
@@ -323,6 +345,22 @@ async function initDb() {
     used_at     TEXT,
     expires_at  TEXT        NOT NULL,
     created_at  TEXT        NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  // Team mailbox activity log (self-hosted Mailcow + `mailbox` sidecar).
+  // The sidecar polls the inbound IMAP folder and POSTs summaries to
+  // /api/mail/inbound-hook; bodies stay in Mailcow's own Dovecot storage —
+  // this table only holds what the portal needs to display/notify.
+  db.exec(`CREATE TABLE IF NOT EXISTS inbound_mail (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_addr   TEXT    NOT NULL,
+    to_addr     TEXT,
+    subject     TEXT    NOT NULL,
+    snippet     TEXT,
+    message_id  TEXT,
+    received_at TEXT    NOT NULL,
+    seen        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
   )`);
 
   // ── empty-database warning ───────────────────────────────────────────────
@@ -370,6 +408,15 @@ async function initDb() {
   for (const name of seed) insert.run(name, descriptions[name] || '');
 
   console.log('DB schema ready');
+
+  // Google Sign-In columns/table (email, picture_url, google_denied). Lazy
+  // require: googleAuth.js requires ./auth which requires ./db.
+  try {
+    require('./googleAuth').migrateGoogle(db);
+  } catch (err) {
+    console.error('Google Sign-In migration failed:', err.message);
+  }
+
   ensureRecurringMeetings();
 }
 

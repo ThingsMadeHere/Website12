@@ -4,16 +4,26 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const express = require('express');
 const cors    = require('cors');
+const helmet  = require('helmet');
+const cookieParser = require('cookie-parser');
+const rateLimit = require('express-rate-limit');
+const { z }   = require('zod');
 const crypto  = require('crypto');
 const fs      = require('fs');
 const path    = require('path');
 const { db, initDb, ADMIN_USERNAMES, ensureRecurringMeetings } = require('./db');
 const { sendMail } = require('./mailer');
 const {
-  hashPassword, verifyPassword,
-  createSession, destroySession, requireAuth, blockIfTimedOut,
+  hashPassword, verifyPassword, maybeUpgradePasswordHash,
+  createSession, destroySession, requireAuth, requireAdmin, blockIfTimedOut,
   getJoinKeyInfo, setJoinKey, clearJoinKey, joinWithKey, KEY_TTL_DAYS,
+  SESSION_TTL_DAYS,
 } = require('./auth');
+const {
+  isConfigured: isGoogleConfigured, clientId: googleClientId, loginWithGoogle,
+  listDeniedEmails, markDeniedReviewed,
+} = require('./googleAuth');
+const gcal = require('./googleCalendar');
 const {
   attachDb, registerSubscription, removeSubscription, getSubscription, getSubscribedUserIds,
   sendBoardMessageNotification, sendMeetingReminderNotification, sendPushNotification,
@@ -24,6 +34,11 @@ const robot = require('./robot');
 const { createRemoteDevRouter } = require('./remoteDev');
 
 const app  = express();
+// Standard production flag (also used for the Secure cookie flag below).
+const isProd = process.env.NODE_ENV === 'production';
+// HttpOnly cookie that lets returning Google users re-sign-in with one click
+// (POST /api/auth/google/quick). Contains only their verified email.
+const GOOGLE_COOKIE = 'mchs_gsid';
 // parseInt: a string PORT (e.g. from PM2's env or the shell) makes
 // server.listen() treat it as a pipe/path and fail in confusing ways.
 const PORT = parseInt(process.env.PORT, 10) || 3001;
@@ -31,9 +46,170 @@ const PORT = parseInt(process.env.PORT, 10) || 3001;
 // Push subscriptions are stored in SQLite — hand the handle to the push module.
 attachDb(db);
 
-app.set('trust proxy', true); // honor X-Forwarded-Proto behind nginx/caddy
+// Behind ONE reverse proxy (nginx/Caddy in front of PM2). `true` (= hop count
+// ∞) lets any client spoof X-Forwarded-* and breaks the rate limiter's IP
+// keying; 1 is the correct setting for a single trusted proxy.
+app.set('trust proxy', 1);
+// Standard security headers on API responses. contentSecurityPolicy is left
+// off: this origin also serves the Vite-built frontend, whose CSP belongs to
+// the static host (nginx/Caddy), not the API.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser()); // required by the Google quick-sign-in cookie routes
 app.use(express.json({ limit: '15mb' })); // applications carry base64 photos
+
+// ── input validation (zod) ───────────────────────────────────────────────────
+// Replaces hand-rolled typeof/regex checks scattered across the routes.
+// Usage: const [data, errResponse] = validate(LoginSchema, req, res);
+function validate(schema, req, res) {
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    res.status(400).json({ error: `${first.path.join('.') || 'body'}: ${first.message}` });
+    return [null, undefined];
+  }
+  return [parsed.data, null];
+}
+
+const UsernameSchema = z.string().trim().toLowerCase()
+  .min(1, 'required').max(32, 'may be at most 32 characters')
+  .regex(/^[a-z0-9._-]+$/, 'may only contain letters, numbers, and . _ - characters');
+
+const LoginSchema = z.object({
+  username: UsernameSchema,
+  password: z.string().min(1, 'required').max(200),
+});
+
+const JoinLoginSchema = z.object({
+  username: z.string().trim().toLowerCase().min(3).max(20)
+    .regex(/^[a-z0-9_]+$/, 'Usernames: 3–20 letters, numbers, or underscores.'),
+  key: z.string().min(1, 'Enter the team key.').max(100),
+});
+
+const PasswordResetSchema = z.object({
+  username: UsernameSchema,
+  currentPassword: z.string().min(1, 'required').max(200),
+  newPassword: z.string().min(6, 'New password must be at least 6 characters').max(200),
+});
+
+const PhotoSchema = z.object({
+  mime: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  data: z.string().min(64, 'Photo data is invalid'),
+});
+
+const ApplicationSchema = z.object({
+  username: UsernameSchema,
+  fullName: z.string().trim().min(1, 'Full name is required').max(80),
+  photo: PhotoSchema.optional(),
+});
+
+const NotificationSettingsSchema = z.object({
+  settings: z.enum(['all', 'mentions_only', 'none']),
+});
+
+const ProfileSchema = z.object({
+  fullName: z.string().trim().min(1, 'Full name is required').max(80),
+});
+
+const ProfilePhotoSchema = z.object({ photo: PhotoSchema });
+
+const ChannelSchema = z.object({
+  name: z.string().min(2, 'Channel name must be at least 2 characters (letters/numbers only)').max(64),
+  description: z.string().max(200).optional().default(''),
+});
+
+const MessageSchema = z.object({
+  body: z.string().trim().min(1, 'Message is empty').max(2000, 'Message is too long (max 2000 characters)'),
+});
+
+const AvailabilitySchema = z.object({
+  title: z.string().max(120).optional().nullable(),
+  date: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?)?$/, 'date must look like 2026-04-10 or 2026-04-10T16:00'),
+  startTime: z.string().regex(/^([0-9]{2}:[0-9]{2})?$/, 'HH:MM').optional().nullable(),
+  endTime: z.string().regex(/^([0-9]{2}:[0-9]{2})?$/, 'HH:MM').optional().nullable(),
+  location: z.string().max(120).optional().nullable(),
+  repeatType: z.enum(['none', 'weekly', 'monthly']).optional().default('none'),
+}).refine(d => d.date, { message: 'Date is required' });
+
+const EventCreateSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(200),
+  description: z.string().max(5000).optional().default(''),
+  date: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?)?$/, 'date must look like 2026-04-10 or 2026-04-10T16:00'),
+  location: z.string().max(200).optional().default(''),
+  type: z.enum(['meeting', 'event', 'workshop', 'competition']).optional().default('meeting'),
+  push: z.boolean().optional().default(false),
+});
+
+const EventUpdateSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(200).optional(),
+  description: z.string().max(5000).optional(),
+  date: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?)?$/, 'date must look like 2026-04-10 or 2026-04-10T16:00').optional(),
+  location: z.string().max(200).optional(),
+  type: z.enum(['meeting', 'event', 'workshop', 'competition']).optional(),
+  status: z.enum(['pending', 'approved', 'rejected']).optional(),
+});
+
+const VoteSchema = z.object({ vote: z.union([z.literal(1), z.literal(-1)]) });
+
+const DecisionSchema = z.object({ action: z.enum(['approve', 'deny']) });
+
+const AdminUserCreateSchema = z.object({
+  username: UsernameSchema,
+  password: z.string().min(6, 'Password must be at least 6 characters').max(200),
+  fullName: z.string().trim().max(80).optional().default(''),
+  photo: PhotoSchema.nullable().optional(),
+  tags: z.array(z.any()).optional().default([]),
+  verified: z.boolean().optional(),
+  mustChangePassword: z.boolean().optional().default(false),
+});
+
+const AdminUserPatchSchema = z.object({
+  username: UsernameSchema.optional(),
+  fullName: z.string().trim().max(80).optional(),
+  verified: z.boolean().optional(),
+  password: z.string().min(6, 'Password must be at least 6 characters').max(200).optional(),
+  mustChangePassword: z.boolean().optional(),
+  photo: PhotoSchema.nullable().optional(),
+}).refine(d => Object.keys(d).length > 0, { message: 'Nothing to update' });
+
+const TimeoutSchema = z.object({
+  minutes: z.number().int().min(1, 'minutes must be between 1 and 527040 (1 year)')
+    .max(60 * 24 * 366, 'minutes must be between 1 and 527040 (1 year)').optional(),
+  until: z.string().datetime({ offset: true }).or(z.string().min(4)).optional(),
+  clear: z.boolean().optional(),
+});
+
+const JoinKeySetSchema = z.object({
+  key: z.string().min(6, 'The team key should be at least 6 characters (letters and numbers).').max(100),
+  label: z.string().max(60).optional().default(''),
+  days: z.number().int().min(1).max(365).optional(),
+});
+
+const PushSubscribeSchema = z.object({
+  subscription: z.object({
+    endpoint: z.string().url('Invalid subscription object').max(2048),
+    keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }).partial().optional(),
+  }),
+});
+
+// ── rate limits (express-rate-limit) ─────────────────────────────────────────
+// Auth endpoints were previously unlimited — trivial to brute-force the team
+// key or member passwords. trust proxy=1 above makes the client IP correct
+// behind nginx/Caddy so these limits actually key on real clients.
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 300, standardHeaders: 'draft-7', legacyHeaders: false,
+  message: { error: 'Too many requests — please slow down.' },
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20, skipSuccessfulRequests: true,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  message: { error: 'Too many sign-in attempts. Try again in a few minutes.' },
+});
+const messageLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 20, standardHeaders: 'draft-7', legacyHeaders: false,
+  message: { error: 'You are sending messages too quickly — take a breath.' },
+});
+app.use('/api', generalLimiter);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -343,11 +519,6 @@ const esc = (s) => String(s)
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 
-function requireAdmin(req, res, next) {
-  if (!req.user?.admin) return res.status(403).json({ error: 'Admin only' });
-  next();
-}
-
 function approveApplication(application, decidedBy = null) {
   const clash = db.prepare('SELECT id FROM users WHERE username = ?').get(application.username);
   if (clash) return { error: `Username '${application.username}' is already taken — cannot approve` };
@@ -413,25 +584,18 @@ function decisionPage(ok, title, message) {
 // approved applicants sign in with the key (an admin shares it at the next
 // meeting). Photo is now optional: small teams recognize their own members;
 // admins can still ask for one on the review card.
-app.post('/api/applications', (req, res) => {
-  const { username, fullName, photo } = req.body || {};
+app.post('/api/applications', authLimiter, (req, res) => {
+  const [data,] = validate(ApplicationSchema, req, res);
+  if (!data) return;
 
-  const cleaned = String(username || '').toLowerCase().trim();
-  if (!cleaned)
-    return res.status(400).json({ error: 'username required' });
-  if (!USERNAME_RE.test(cleaned))
-    return res.status(400).json({ error: 'Username may only contain letters, numbers, and . _ - characters' });
+  const cleaned = data.username;
+  const name = data.fullName;
 
-  const name = String(fullName || '').trim().slice(0, 80);
-  if (!name)
-    return res.status(400).json({ error: 'Full name is required' });
-
-  let mime = null, buf = null;
-  if (photo && photo.mime) {
-    const ext = PHOTO_MIMES[mime = photo.mime];
-    if (!ext)
-      return res.status(400).json({ error: 'Photo must be JPG, PNG, WebP, or GIF' });
-    try { buf = Buffer.from(String(photo.data || ''), 'base64'); } catch { buf = null; }
+  let mime = null, buf = null, ext = null;
+  if (data.photo) {
+    mime = data.photo.mime;
+    ext = PHOTO_MIMES[mime]; // already whitelisted by the schema
+    try { buf = Buffer.from(data.photo.data, 'base64'); } catch { buf = null; }
     if (!buf || buf.length < 64)
       return res.status(400).json({ error: 'Photo data is invalid' });
     if (buf.length > MAX_PHOTO_BYTES)
@@ -466,7 +630,7 @@ app.post('/api/applications', (req, res) => {
     `Name:      ${name}`,
     `Username:  @${cleaned}`,
     `Submitted: ${when}`,
-    'Photo:     attached',
+    `Photo:     ${buf ? 'attached' : 'not provided'}`,
     '',
     `Approve: ${approveUrl}`,
     `Deny:    ${denyUrl}`,
@@ -502,7 +666,7 @@ app.post('/api/applications', (req, res) => {
     subject: `Approve or deny: ${name} (@${cleaned}) — MCHS Robotics application`,
     text,
     html,
-    attachments: [{ filename: `applicant-${id}-${cleaned}.${ext}`, content: buf.toString('base64') }],
+    attachments: buf ? [{ filename: `applicant-${id}-${cleaned}.${ext}`, content: buf.toString('base64') }] : [],
   })
     .then(r => {
       if (!r.sent)
@@ -522,7 +686,10 @@ app.get('/api/applications/:id/decision', (req, res) => {
   const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(Number(req.params.id));
   res.type('html');
 
-  if (!row || row.token !== String(req.query.token || ''))
+  const providedTok = Buffer.from(String(req.query.token || ''));
+  const expectedTok = Buffer.from(String(row?.token ?? ''));
+  const tokenOk = providedTok.length === expectedTok.length && crypto.timingSafeEqual(providedTok, expectedTok);
+  if (!row || !tokenOk)
     return res.status(400).send(decisionPage(false, 'Invalid link', 'This approval link is invalid or has already been replaced. Review the application from the Applications page instead.'));
 
   if (row.status !== 'pending')
@@ -577,7 +744,9 @@ app.post('/api/applications/:id/decision', requireAuth, requireAdmin, (req, res)
   if (row.status !== 'pending')
     return res.status(409).json({ error: `Application was already ${row.status}` });
 
-  const action = String((req.body || {}).action || '');
+  const [decisionData,] = validate(DecisionSchema, req, res);
+  if (!decisionData) return;
+  const action = decisionData.action;
   if (action === 'approve') {
     const result = approveApplication(row, req.user.id);
     if (result.error) return res.status(409).json({ error: result.error });
@@ -589,7 +758,6 @@ app.post('/api/applications/:id/decision', requireAuth, requireAdmin, (req, res)
     console.log(`Application #${row.id} denied by ${req.user.username}`);
     return res.json({ ok: true, status: 'denied' });
   }
-  return res.status(400).json({ error: "action must be 'approve' or 'deny'" });
 });
 
 // ── accounts ─────────────────────────────────────────────────────────────────
@@ -614,17 +782,141 @@ function sessionPayload(user) {
   };
 }
 
-// POST /api/login/join  { username, key }
-// Small-team sign-in — self-service. The admin sets ONE shared "team key"
-// (Admin panel → Team Key, e.g. "ROBO-KEY-2026"). Students pick a username and
-// sign in with the key any time they like; no per-login admin help, nothing to
-// forget or burn. Correct key + unknown username = account created on the
-// spot. Wrong/missing key + unknown username = the join-application path opens
-// (that's where manual approval lives). Password login stays as the private
-// fallback for seeded/recovery accounts.
-app.post('/api/login/join', (req, res) => {
-  const { username, key } = req.body || {};
-  const result = joinWithKey(username, key);
+// ── sign-in ──────────────────────────────────────────────────────────────────
+// Primary method: Google Sign-In (api/googleAuth.js). The browser gets an ID
+// token from Google Identity Services and posts it here; we verify it
+// server-side, gate by school domain (GOOGLE_ALLOWED_DOMAINS), create/link the
+// account, and hand back a session. No passwords, no team key, nothing to
+// forget on Chromebooks.
+//
+// Legacy paths kept for recovery/automation accounts and old scripts:
+//   POST /api/login        { username, password }  — bcrypt fallback
+//   POST /api/login/join   { username, key }       — old shared team key
+//   POST /api/password/reset                       — forced password change
+
+// GET /api/auth/config — what the sign-in screen needs to know (public).
+app.get('/api/auth/config', (_, res) => {
+  const configured = isGoogleConfigured();
+  res.json({
+    googleEnabled: configured,
+    // Only expose the client ID when Google sign-in actually works, so the
+    // frontend never renders a button that can only fail.
+    googleClientId: configured ? googleClientId() : null,
+  });
+});
+
+// POST /api/auth/google  { credential }  (credential = Google ID token)
+// On success responds with the standard session payload AND sets an HttpOnly
+// cookie (mchs_gsid=<email>) so a returning user can complete sign-in with one
+// click — no popup, no interaction, safe for kiosk-style Chromebooks.
+app.post('/api/auth/google', authLimiter, async (req, res) => {
+  if (!isGoogleConfigured())
+    return res.status(503).json({ error: 'Google Sign-In is not configured on this server yet.' });
+
+  const credential = String((req.body || {}).credential || '');
+  const result = await loginWithGoogle(credential);
+
+  if (result.error && !result.denied && !result.pending)
+    return res.status(401).json({ error: result.error });
+  if (result.denied)
+    return res.status(403).json({ code: 'denied', email: result.email, error: result.error });
+  if (result.pending)
+    return res.status(403).json({ code: 'pending', error: result.error });
+
+  console.log(`@${result.user.username} signed in with Google <${result.user.email}>`);
+  res.cookie(GOOGLE_COOKIE, result.user.email, {
+    httpOnly: true, sameSite: 'lax', secure: isProd,
+    maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000, path: '/',
+  });
+  res.json(sessionPayload(result.user));
+});
+
+// POST /api/auth/google/quick  {} — silent re-auth for users who signed in
+// with Google before: the browser still has our HttpOnly cookie, so we mint a
+// fresh session without touching Google at all. Rate-limited + requires the
+// cookie to match an existing verified account.
+app.post('/api/auth/google/quick', authLimiter, (req, res) => {
+  const email = String(req.cookies?.[GOOGLE_COOKIE] || '').toLowerCase().trim();
+  if (!email) return res.status(401).json({ error: 'Not signed in' });
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  if (!user) return res.status(401).json({ error: 'Account not found — please sign in again.' });
+  if (!user.verified)
+    return res.status(403).json({ code: 'pending', error: 'Your account is still pending admin approval.' });
+
+  res.json(sessionPayload(user));
+});
+
+// GET /api/auth/google/status — does this browser carry the quick-sign-in
+// cookie? Lets the landing page show a one-click "Continue as …" button.
+app.get('/api/auth/google/status', (req, res) => {
+  const email = String(req.cookies?.[GOOGLE_COOKIE] || '').toLowerCase().trim();
+  if (!email) return res.json({ remembered: false });
+  const user = db.prepare('SELECT username, full_name, verified FROM users WHERE email = ?').get(email);
+  if (!user) return res.json({ remembered: false });
+  res.json({ remembered: true, username: user.username, fullName: user.full_name || '', verified: !!user.verified });
+});
+
+// (The quick-sign-in cookie is cleared in POST /api/logout below.)
+
+// ── Google sign-in: admin review of blocked accounts ─────────────────────────
+// When someone signs in with a non-approved domain, googleAuth.js records them
+// in `google_denied` so an admin can see the attempt here (and then either add
+// the school's domain to GOOGLE_ALLOWED_DOMAINS or approve that exact address
+// via GOOGLE_ALLOWLIST + re-check).
+
+// GET /api/admin/google-denied — recent blocked sign-in attempts (admin)
+app.get('/api/admin/google-denied', requireAuth, requireAdmin, (_, res) => {
+  res.json({ requests: listDeniedEmails() });
+});
+
+// POST /api/admin/google-denied/:id/review — mark an attempt as handled
+app.post('/api/admin/google-denied/:id/review', requireAuth, requireAdmin, (req, res) => {
+  markDeniedReviewed(req.params.id);
+  res.json({ ok: true });
+});
+
+// ── team key (LEGACY admin-managed) ──────────────────────────────────────────
+
+// GET /api/admin/join-key — status only; the key itself is stored hashed
+app.get('/api/admin/join-key', requireAuth, requireAdmin, (_, res) => {
+  const info = getJoinKeyInfo();
+  if (!info) return res.json({ set: false });
+  res.json({
+    set: true,
+    label: info.label,
+    createdAt: info.createdAt,
+    expiresAt: info.expiresAt,
+    expired: new Date(info.expiresAt.replace(' ', 'T') + 'Z').getTime() < Date.now(),
+  });
+});
+
+// POST /api/admin/join-key  { key, label?, days? } — set or rotate the key.
+// Existing sessions stay valid; only NEW sign-ins need the new key.
+app.post('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
+  const [body,] = validate(JoinKeySetSchema, req, res);
+  if (!body) return;
+  const ttl = body.days || KEY_TTL_DAYS;
+  const r = setJoinKey(body.key, req.user.id, body.label, ttl);
+  if (r.error) return res.status(400).json({ error: r.error });
+  console.log(`Team key rotated by ${req.user.username} (label "${r.label}", valid ${ttl}d)`);
+  res.json({ ok: true, label: r.label, createdAt: r.createdAt, expiresAt: r.expiresAt });
+});
+
+// DELETE /api/admin/join-key — close self-service sign-in (applications still work)
+app.delete('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
+  clearJoinKey();
+  console.log(`Team key removed by ${req.user.username}`);
+  res.json({ ok: true });
+});
+
+// Legacy fallback: POST /api/login/join  { username, key } — the old shared
+// "team key" sign-in. Superseded by Google Sign-In; kept only so recovery/
+// automation scripts and old databases keep working. Not offered in the UI.
+app.post('/api/login/join', authLimiter, (req, res) => {
+  const [data,] = validate(JoinLoginSchema, req, res);
+  if (!data) return;
+  const result = joinWithKey(data.username, data.key);
 
   if (result.pending)
     return res.status(403).json({
@@ -633,7 +925,7 @@ app.post('/api/login/join', (req, res) => {
     });
 
   if (result.apply) {
-    const uname = String(username || '').toLowerCase().trim();
+    const uname = String(data.username || '').toLowerCase().trim();
     // Raise (or reuse) a pending application so an admin sees them in the queue.
     let appId = db
       .prepare(`SELECT id FROM applications WHERE username = ? AND status = 'pending'`)
@@ -664,50 +956,18 @@ app.post('/api/login/join', (req, res) => {
   if (result.error) return res.status(401).json({ error: result.error });
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.userId);
-  console.log(`@${user.username} signed in with the team key${user.password_hash === '!join-key' ? ' (new account)' : ''}`);
+  console.log(`@${user.username} signed in with the legacy team key`);
   res.json(sessionPayload(user));
 });
 
-// ── team key (admin-managed) ─────────────────────────────────────────────────
+// POST /api/login  { username, password } — legacy bcrypt sign-in kept for
+// recovery/automation accounts (and the E2E test suite). Regular members use
+// Google Sign-In above.
+app.post('/api/login', authLimiter, (req, res) => {
+  const [data,] = validate(LoginSchema, req, res);
+  if (!data) return;
 
-// GET /api/admin/join-key — status only; the key itself is stored hashed
-app.get('/api/admin/join-key', requireAuth, requireAdmin, (_, res) => {
-  const info = getJoinKeyInfo();
-  if (!info) return res.json({ set: false });
-  res.json({
-    set: true,
-    label: info.label,
-    createdAt: info.createdAt,
-    expiresAt: info.expiresAt,
-    expired: new Date(info.expiresAt.replace(' ', 'T') + 'Z').getTime() < Date.now(),
-  });
-});
-
-// POST /api/admin/join-key  { key, label?, days? } — set or rotate the key.
-// Existing sessions stay valid; only NEW sign-ins need the new key.
-app.post('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
-  const body = req.body || {};
-  const ttl = Math.min(365, Math.max(1, Number(body.days) || KEY_TTL_DAYS));
-  const r = setJoinKey(body.key, req.user.id, body.label, ttl);
-  if (r.error) return res.status(400).json({ error: r.error });
-  console.log(`Team key rotated by ${req.user.username} (label "${r.label}", valid ${ttl}d)`);
-  res.json({ ok: true, label: r.label, createdAt: r.createdAt, expiresAt: r.expiresAt });
-});
-
-// DELETE /api/admin/join-key — close self-service sign-in (applications still work)
-app.delete('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
-  clearJoinKey();
-  console.log(`Team key removed by ${req.user.username}`);
-  res.json({ ok: true });
-});
-
-// POST /api/login  { username, password }
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password)
-    return res.status(400).json({ error: 'username and password required' });
-
-  const uname = username.toLowerCase().trim();
+  const uname = data.username;
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(uname);
 
   if (!user) {
@@ -733,7 +993,8 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
 
-  if (!verifyPassword(password, user.password_hash))
+  // bcrypt verify; legacy scrypt hashes are upgraded transparently on success.
+  if (!maybeUpgradePasswordHash(user, data.password))
     return res.status(401).json({ error: 'Invalid username or password' });
 
   // An admin flagged this account for a forced password change — no session
@@ -769,26 +1030,23 @@ app.post('/api/login', (req, res) => {
 // POST /api/password/reset  { username, currentPassword, newPassword }
 // Completes a forced password change (users.must_change_password = 1) and
 // returns a fresh session, exactly like /api/login.
-app.post('/api/password/reset', (req, res) => {
-  const { username, currentPassword, newPassword } = req.body || {};
-  if (!username || !currentPassword || !newPassword)
-    return res.status(400).json({ error: 'username, currentPassword and newPassword are required' });
+app.post('/api/password/reset', authLimiter, (req, res) => {
+  const [data,] = validate(PasswordResetSchema, req, res);
+  if (!data) return;
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username).toLowerCase().trim());
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(data.username);
   if (!user || !user.must_change_password)
     return res.status(403).json({ error: 'This account does not need a password reset — sign in normally' });
 
-  if (!verifyPassword(String(currentPassword), user.password_hash))
+  if (!maybeUpgradePasswordHash(user, data.currentPassword))
     return res.status(401).json({ error: 'Current password is incorrect' });
 
-  if (String(newPassword).length < 6)
-    return res.status(400).json({ error: 'New password must be at least 6 characters' });
-  if (verifyPassword(String(newPassword), user.password_hash))
+  if (verifyPassword(data.newPassword, user.password_hash))
     return res.status(400).json({ error: 'New password must be different from the current one' });
 
   db.prepare(
     `UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?`
-  ).run(hashPassword(String(newPassword)), user.id);
+  ).run(hashPassword(data.newPassword), user.id);
   // The forced reset also invalidates any older lingering sessions.
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
 
@@ -811,24 +1069,22 @@ app.post('/api/password/reset', (req, res) => {
   });
 });
 
-// POST /api/logout
+// POST /api/logout — destroys the session and clears the Google quick-sign-in
+// cookie so "Sign out" really means signed out everywhere on this browser.
 app.post('/api/logout', requireAuth, (req, res) => {
   destroySession(req.user.token);
   updateUserPresence(req.user.id, false); // Mark user as offline
+  res.clearCookie(GOOGLE_COOKIE, { path: '/' });
   res.json({ ok: true });
 });
 
 // PUT /api/me/notification-settings — update notification preferences
 app.put('/api/me/notification-settings', requireAuth, (req, res) => {
-  const { settings } = req.body || {};
-  const validSettings = ['all', 'mentions_only', 'none'];
-  
-  if (!settings || !validSettings.includes(settings)) {
-    return res.status(400).json({ error: 'Invalid notification settings. Must be "all", "mentions_only", or "none"' });
-  }
-  
-  db.prepare('UPDATE users SET notification_settings = ? WHERE id = ?').run(settings, req.user.id);
-  res.json({ ok: true, notificationSettings: settings });
+  const [data,] = validate(NotificationSettingsSchema, req, res);
+  if (!data) return;
+
+  db.prepare('UPDATE users SET notification_settings = ? WHERE id = ?').run(data.settings, req.user.id);
+  res.json({ ok: true, notificationSettings: data.settings });
 });
 
 // POST /api/verify — grants the ✓ verified badge (admin only; the badge is
@@ -871,11 +1127,9 @@ app.get('/api/me', requireAuth, (req, res) => {
 
 // PUT /api/profile — update profile information (full name)
 app.put('/api/profile', requireAuth, blockIfTimedOut, (req, res) => {
-  const { fullName } = req.body || {};
-  if (!fullName || String(fullName).trim().length === 0) {
-    return res.status(400).json({ error: 'Full name is required' });
-  }
-  db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(String(fullName).trim().slice(0, 80), req.user.id);
+  const [data,] = validate(ProfileSchema, req, res);
+  if (!data) return;
+  db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(data.fullName, req.user.id);
   res.json({ ok: true });
 });
 
@@ -1249,7 +1503,32 @@ function eventRow(row) {
     isMeeting: (row.type || 'meeting') === 'meeting',
     proposedBy: row.proposed_by != null && row.proposed_by !== '' ? Number(row.proposed_by) : null,
     proposerName: row.proposer_name || null,
+    // Google Calendar mirror: set once the event has been written to the
+    // team's Google Calendar; source marks president/admin direct writes.
+    gcalEventId: row.gcal_event_id || null,
+    source: row.source || 'portal',
   };
+}
+
+// Fire-and-forget mirror of an approved portal event into Google Calendar.
+// Never blocks or fails the API call — syncPending() retries any misses.
+function gcalMirror(event, action = 'insert') {
+  if (!gcal.isConfigured()) return Promise.resolve();
+  const run = async () => {
+    try {
+      if (action === 'insert' && !event.gcal_event_id) {
+        const id = await gcal.insertEvent(event);
+        if (id) db.prepare('UPDATE calendar_events SET gcal_event_id = ? WHERE id = ?').run(id, event.id);
+      } else if (action === 'update' && event.gcal_event_id) {
+        await gcal.updateEvent(event, event.gcal_event_id);
+      } else if (action === 'delete' && event.gcal_event_id) {
+        await gcal.deleteEvent(event.gcal_event_id);
+      }
+    } catch (err) {
+      console.error(`[gcal] mirror ${action} failed for event ${event.id}:`, err.message);
+    }
+  };
+  return run();
 }
 
 // Notify everyone subscribed to pushes that an event landed on the calendar.
@@ -1418,7 +1697,7 @@ app.post('/api/events', requireAuth, blockIfTimedOut, (req, res) => {
       .run(String(title).trim(), description || '', date, location || '', evType, status, String(req.user.id));
 
     const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(info.lastInsertRowid);
-    if (status === 'approved') notifyEventApproved(event);
+    if (status === 'approved') { notifyEventApproved(event); gcalMirror(event, 'insert'); }
     res.json(eventRow(event));
   } catch (err) {
     console.error('Error creating event:', err);
@@ -1429,7 +1708,7 @@ app.post('/api/events', requireAuth, blockIfTimedOut, (req, res) => {
 // DELETE /api/events/:id — proposer deletes their own event; admins delete any
 app.delete('/api/events/:id', requireAuth, (req, res) => {
   try {
-    const event = db.prepare('SELECT id, proposed_by FROM calendar_events WHERE id = ?').get(req.params.id);
+    const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     // Numeric compare: better-sqlite3 v12 stores JS numbers bound into this TEXT
@@ -1440,6 +1719,7 @@ app.delete('/api/events/:id', requireAuth, (req, res) => {
       return res.status(403).json({ error: 'You can only delete events you proposed' });
 
     db.prepare('DELETE FROM calendar_events WHERE id = ?').run(req.params.id);
+    if (event.gcal_event_id) gcalMirror(event, 'delete'); // keep Google in sync
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting event:', err);
@@ -1485,7 +1765,9 @@ app.put('/api/events/:id', requireAuth, blockIfTimedOut, (req, res) => {
     ).run(next.title, next.description, next.date, next.location, next.type, next.status, event.id);
 
     const updated = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(event.id);
-    if (!wasApproved && next.status === 'approved') notifyEventApproved(updated);
+    if (!wasApproved && next.status === 'approved') { notifyEventApproved(updated); gcalMirror(updated, 'insert'); }
+    else if (wasApproved && next.status !== 'approved') gcalMirror(updated, 'delete'); // pulled off the calendar → remove from Google too
+    else if (wasApproved) gcalMirror(updated, 'update');                                // details changed → patch Google
     res.json(eventRow(updated));
   } catch (err) {
     console.error('Error updating event:', err);
@@ -1532,7 +1814,9 @@ app.post('/api/events/:id/vote', requireAuth, blockIfTimedOut, (req, res) => {
     const yes = totals.yes_votes || 0, total = totals.total_votes || 0;
     if (ev && ev.status === 'pending' && total > 0 && yes >= Math.floor(total / 2) + 1) {
       db.prepare(`UPDATE calendar_events SET status = 'approved' WHERE id = ?`).run(req.params.id);
-      notifyEventApproved(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id));
+      const promotedEvent = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id);
+      notifyEventApproved(promotedEvent);
+      gcalMirror(promotedEvent, 'insert');
       promoted = true;
     }
 
@@ -1581,6 +1865,7 @@ app.put('/api/events/:id/approve', requireAuth, (req, res) => {
     if (req.user.admin || (totalVotes > 0 && yesVotes >= majority)) {
       db.prepare(`UPDATE calendar_events SET status = 'approved' WHERE id = ?`).run(req.params.id);
       notifyEventApproved(event);
+      gcalMirror(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id), 'insert');
       res.json({ success: true, approved: true, message: 'Event approved and added to calendar' });
     } else {
       res.status(400).json({
@@ -1611,6 +1896,145 @@ app.put('/api/events/:id/reject', requireAuth, requireAdmin, (req, res) => {
     console.error('Error rejecting event:', err);
     res.status(500).json({ error: 'Failed to reject event' });
   }
+});
+
+// ── Google Calendar (Option A: portal stays source of truth, mirrored to gcal) ─
+// GET /api/gcal/config — is sync set up on this server? (anyone; UI gates on it)
+app.get('/api/gcal/config', (_, res) => {
+  res.json({ configured: gcal.isConfigured() });
+});
+
+// GET /api/gcal/status — admin view: linkage + last errors surfaced via logs.
+app.get('/api/gcal/status', requireAuth, requireAdmin, async (_, res) => {
+  try {
+    const linked = db.prepare(
+      `SELECT COUNT(*) AS n FROM calendar_events WHERE gcal_event_id IS NOT NULL AND gcal_event_id != ''`
+    ).get().n;
+    const pendingSync = db.prepare(
+      `SELECT COUNT(*) AS n FROM calendar_events
+       WHERE status = 'approved' AND (gcal_event_id IS NULL OR gcal_event_id = '')
+         AND date >= datetime('now', '-400 days')`
+    ).get().n;
+    let lastSync = null;
+    if (gcal.isConfigured()) {
+      const list = await gcal.listUpcoming(1);
+      lastSync = list.events ? new Date().toISOString() : (list.error || null);
+    }
+    res.json({ configured: gcal.isConfigured(), linked, pendingSync, reachable: !!lastSync && !String(lastSync).includes('not configured') });
+  } catch (err) {
+    console.error('gcal status failed:', err.message);
+    res.json({ configured: gcal.isConfigured(), error: err.message });
+  }
+});
+
+// POST /api/gcal/direct — the president/admin writes an event DIRECTLY to the
+// team's Google Calendar (no voting), and it also lands on the portal calendar
+// with source='gcal-direct' so members see it everywhere at once.
+app.post('/api/gcal/direct', requireAuth, requireAdmin, blockIfTimedOut, async (req, res) => {
+  if (!gcal.isConfigured())
+    return res.status(503).json({ error: 'Google Calendar sync is not configured on this server (see api/.env.example).' });
+  const { title, date, endDate, location, description } = req.body || {};
+  if (!title || !date) return res.status(400).json({ error: 'Title and date are required' });
+  try {
+    const created = await gcal.createDirect({ title, date, endDate, location, description });
+    if (created.error) return res.status(400).json({ error: created.error });
+    // Mirror into the portal DB as an approved event (source-tagged).
+    const info = db.prepare(
+      `INSERT INTO calendar_events (title, description, date, location, type, status, proposed_by, gcal_event_id, source)
+       VALUES (?, ?, ?, ?, 'event', 'approved', ?, ?, 'gcal-direct')`
+    ).run(String(title).trim(), description || '', date, location || '', String(req.user.id), created.event.id);
+    const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(info.lastInsertRowid);
+    notifyEventApproved(event); // push subscribers that a new event landed
+    res.json({ success: true, event: eventRow(event), google: created.event });
+  } catch (err) {
+    console.error('gcal direct create failed:', err.message);
+    res.status(502).json({ error: `Google Calendar write failed: ${err.message}` });
+  }
+});
+
+// GET /api/gcal/upcoming — preview what's currently on the Google calendar (admin)
+app.get('/api/gcal/upcoming', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const list = await gcal.listUpcoming(req.query.maxResults || 50);
+    if (list.error) return res.status(503).json({ error: list.error });
+    res.json(list);
+  } catch (err) {
+    console.error('gcal upcoming failed:', err.message);
+    res.status(502).json({ error: `Google Calendar read failed: ${err.message}` });
+  }
+});
+
+// POST /api/gcal/import — one-time import of existing Google events into the
+// portal calendar (skips anything already linked or same-titled-and-dated).
+app.post('/api/gcal/import', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const list = await gcal.listUpcoming(250);
+    if (list.error) return res.status(503).json({ error: list.error });
+    let imported = 0;
+    for (const ge of list.events) {
+      if (!ge.start) continue;
+      const exists = db.prepare('SELECT id FROM calendar_events WHERE gcal_event_id = ?').get(ge.id);
+      if (exists) continue;
+      db.prepare(
+        `INSERT INTO calendar_events (title, description, date, location, type, status, proposed_by, gcal_event_id, source)
+         VALUES (?, ?, ?, ?, 'event', 'approved', NULL, ?, 'gcal-import')`
+      ).run(ge.summary || 'Google event', ge.description || '', ge.start, ge.location || '', ge.id);
+      imported++;
+    }
+    res.json({ success: true, imported });
+  } catch (err) {
+    console.error('gcal import failed:', err.message);
+    res.status(502).json({ error: `Google Calendar import failed: ${err.message}` });
+  }
+});
+
+// ── team mailbox (self-hosted Mailcow + the `mailbox` sidecar container) ────
+// Outgoing mail goes through SMTP on port 587 (see api/mailer.js — port 25 is
+// never required from the app; it's only used by MX servers delivering INTO
+// Mailcow, and can be remapped to 2525 if your host blocks it). Incoming mail
+// lands in the team@… mailbox; the `mailbox` container polls it over IMAP and
+// notifies this API here. The hook stores a summary in SQLite so admins can
+// see team mail activity in the portal, pushes a notification, and forwards
+// everything to ADMIN_EMAIL via the normal mailer.
+app.post('/api/mail/inbound-hook', (req, res) => {
+  const secret = (process.env.MAILHOOK_TOKEN || '').trim();
+  if (!secret) return res.status(503).json({ error: 'MAILHOOK_TOKEN not configured' });
+  const token = req.get('x-mailhook-token') || '';
+  if (token.length !== secret.length || !require('crypto').timingSafeEqual(Buffer.from(token.padEnd(secret.length)), Buffer.from(secret))) {
+    return res.status(401).json({ error: 'bad hook token' });
+  }
+  const { from, to, subject, receivedAt, messageId, snippet } = req.body || {};
+  if (!from || !subject) return res.status(400).json({ error: 'from and subject are required' });
+  try {
+    const info = db.prepare(
+      `INSERT INTO inbound_mail (from_addr, to_addr, subject, snippet, message_id, received_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(String(from).slice(0, 254), String(to || '').slice(0, 254), String(subject).slice(0, 500),
+          String(snippet || '').slice(0, 900), String(messageId || '').slice(0, 254),
+          String(receivedAt || new Date().toISOString()).slice(0, 64));
+    console.log(`[mail] inbound #${info.lastInsertRowid}: "${subject}" from ${from}`);
+    sendMail({
+      subject: `[team-mail] ${subject}`,
+      text: `New email for the team mailbox.\n\nFrom: ${from}\nTo: ${to}\nSubject: ${subject}\n\n${snippet || ''}`,
+      html: `<p><b>From:</b> ${String(from)}</p><p><b>To:</b> ${String(to || '')}</p>` +
+            `<p><b>Subject:</b> ${String(subject)}</p><pre style="white-space:pre-wrap">${String(snippet || '')}</pre>` +
+            `<p style="color:#888">Delivered by the MCHS Robotics team mailbox.</p>`,
+    }).catch(() => {});
+    res.json({ success: true, id: info.lastInsertRowid });
+  } catch (err) {
+    console.error('[mail] inbound hook failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/mail/inbox?limit=50 (admin) — recent team-mail summaries
+app.get('/api/mail/inbox', requireAuth, requireAdmin, (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+  res.json(db.prepare(
+    `SELECT id, from_addr AS fromAddr, to_addr AS toAddr, subject, snippet,
+            received_at AS receivedAt
+     FROM inbound_mail ORDER BY id DESC LIMIT ?`
+  ).all(limit));
 });
 
 // ── admin: member management ─────────────────────────────────────────────────
@@ -1958,6 +2382,16 @@ initDb().then(() => {
     catch (err) { console.error('Recurring meeting seeding failed:', err); }
   }, 6 * 60 * 60 * 1000);
   reseed.unref?.();
+
+  // Google Calendar: retry any approved events that missed their mirror write
+  // (server restarted mid-push, transient API errors, pre-sync backlog).
+  if (gcal.isConfigured()) {
+    gcal.syncPending(db).catch(() => {});
+    const gcalSync = setInterval(() => {
+      gcal.syncPending(db).catch(err => console.error('[gcal] background sync failed:', err.message));
+    }, 15 * 60 * 1000);
+    gcalSync.unref?.();
+  }
   
   // Start meeting reminder scheduler
   scheduleMeetingReminders();
