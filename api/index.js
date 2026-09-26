@@ -5,6 +5,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const express = require('express');
 const cors    = require('cors');
 const helmet  = require('helmet');
+const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const { z }   = require('zod');
 const crypto  = require('crypto');
@@ -16,7 +17,12 @@ const {
   hashPassword, verifyPassword, maybeUpgradePasswordHash,
   createSession, destroySession, requireAuth, requireAdmin, blockIfTimedOut,
   getJoinKeyInfo, setJoinKey, clearJoinKey, joinWithKey, KEY_TTL_DAYS,
+  SESSION_TTL_DAYS,
 } = require('./auth');
+const {
+  isConfigured: isGoogleConfigured, loginWithGoogle,
+  listDeniedEmails, markDeniedReviewed,
+} = require('./googleAuth');
 const {
   attachDb, registerSubscription, removeSubscription, getSubscription, getSubscribedUserIds,
   sendBoardMessageNotification, sendMeetingReminderNotification, sendPushNotification,
@@ -27,6 +33,11 @@ const robot = require('./robot');
 const { createRemoteDevRouter } = require('./remoteDev');
 
 const app  = express();
+// Standard production flag (also used for the Secure cookie flag below).
+const isProd = process.env.NODE_ENV === 'production';
+// HttpOnly cookie that lets returning Google users re-sign-in with one click
+// (POST /api/auth/google/quick). Contains only their verified email.
+const GOOGLE_COOKIE = 'mchs_gsid';
 // parseInt: a string PORT (e.g. from PM2's env or the shell) makes
 // server.listen() treat it as a pipe/path and fail in confusing ways.
 const PORT = parseInt(process.env.PORT, 10) || 3001;
@@ -43,6 +54,7 @@ app.set('trust proxy', 1);
 // the static host (nginx/Caddy), not the API.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors({ origin: true, credentials: true }));
+app.use(cookieParser()); // required by the Google quick-sign-in cookie routes
 app.use(express.json({ limit: '15mb' })); // applications carry base64 photos
 
 // ── input validation (zod) ───────────────────────────────────────────────────
@@ -844,7 +856,24 @@ app.get('/api/auth/google/status', (req, res) => {
   res.json({ remembered: true, username: user.username, fullName: user.full_name || '', verified: !!user.verified });
 });
 
-// POST /api/logout also clears the quick-sign-in cookie (see below).
+// (The quick-sign-in cookie is cleared in POST /api/logout below.)
+
+// ── Google sign-in: admin review of blocked accounts ─────────────────────────
+// When someone signs in with a non-approved domain, googleAuth.js records them
+// in `google_denied` so an admin can see the attempt here (and then either add
+// the school's domain to GOOGLE_ALLOWED_DOMAINS or approve that exact address
+// via GOOGLE_ALLOWLIST + re-check).
+
+// GET /api/admin/google-denied — recent blocked sign-in attempts (admin)
+app.get('/api/admin/google-denied', requireAuth, requireAdmin, (_, res) => {
+  res.json({ requests: listDeniedEmails() });
+});
+
+// POST /api/admin/google-denied/:id/review — mark an attempt as handled
+app.post('/api/admin/google-denied/:id/review', requireAuth, requireAdmin, (req, res) => {
+  markDeniedReviewed(req.params.id);
+  res.json({ ok: true });
+});
 
 // ── team key (LEGACY admin-managed) ──────────────────────────────────────────
 
@@ -1039,10 +1068,12 @@ app.post('/api/password/reset', authLimiter, (req, res) => {
   });
 });
 
-// POST /api/logout
+// POST /api/logout — destroys the session and clears the Google quick-sign-in
+// cookie so "Sign out" really means signed out everywhere on this browser.
 app.post('/api/logout', requireAuth, (req, res) => {
   destroySession(req.user.token);
   updateUserPresence(req.user.id, false); // Mark user as offline
+  res.clearCookie(GOOGLE_COOKIE, { path: '/' });
   res.json({ ok: true });
 });
 
