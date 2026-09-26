@@ -34,9 +34,32 @@ module.exports = {
       autorestart: true,
       restart_delay: 1000,
       max_memory_restart: '500M',
+      // graceful reload: SIGTERM → wait → SIGKILL (used by pm2-deploy.sh)
+      kill_timeout: 5000,
+      wait_ready: false,
       error_file: './logs/pm2-api-error.log',
       out_file: './logs/pm2-api-out.log',
       log_file: './logs/pm2-api-combined.log',
+      time: true
+    },
+    {
+      // Isolated TEST instance managed by scripts/pm2-test.sh.
+      // Never started by `pm2 start ecosystem.config.cjs` — use:
+      //   pm2 start ecosystem.config.cjs --only mchs-api-test
+      // Own port (3101) and own throwaway DB (/tmp/mchs-test.db), so it can
+      // run alongside production without touching real data.
+      name: 'mchs-api-test',
+      script: 'index.js',
+      cwd: './api',
+      interpreter: 'node',
+      env: {
+        NODE_ENV: 'test',
+        PORT: parseInt(process.env.PORT || '3101', 10),
+        DATABASE_PATH: process.env.DATABASE_PATH || '/tmp/mchs-test.db'
+      },
+      autorestart: false,   // a broken test build should stop, not crash-loop
+      error_file: './logs/pm2-test-error.log',
+      out_file: './logs/pm2-test-out.log',
       time: true
     }
   ]
