@@ -1,16 +1,52 @@
 const Database = require('better-sqlite3');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+// Load api/.env BEFORE resolving DATABASE_PATH — dotenv is normally loaded by
+// index.js, but scripts that require('./db') directly (test/seed-admin.js,
+// scripts/set-admin.sh helpers, migrations) must see the same env the server
+// does, or they silently operate on a DIFFERENT database than production.
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // Usernames that always receive admin privileges (promoted on startup + registration).
 const ADMIN_USERNAMES = ['carter', 'carterherrault'];
 
-// Default database location: <repo parent>/JarvisData/database/mchs.db
-// JarvisData sits OUTSIDE the repo, as a sibling directory: ~/JarvisData (~/Jarvis/../JarvisData)
+// Expand a leading '~' to the current user's home dir so DATABASE_PATH can be
+// written as '~/JarvisData/database/mchs.db' in .env / systemd / PM2 configs.
+function expandHome(p) {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
+
+// Default database location: ~/JarvisData/database/mchs.db
+// JarvisData lives OUTSIDE the repo, under the user's home directory
+// (matches DATA_DIR in scripts/set-admin.sh and backup/restore scripts).
 // (overridable with DATABASE_PATH, e.g. the Docker volume at /app/data).
-const defaultDbPath = path.join(__dirname, '..', '..', 'JarvisData', 'database', 'mchs.db');
-const dbPath = process.env.DATABASE_PATH || defaultDbPath;
+const defaultDbPath = path.join(os.homedir(), 'JarvisData', 'database', 'mchs.db');
+const dbPath = expandHome(process.env.DATABASE_PATH || defaultDbPath);
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+// ── integrity guard ──────────────────────────────────────────────────────────
+// SQLite keeps uncommitted data in the -wal sidecar file. If it exists but the
+// main DB cannot be opened (deleted/corrupted/truncated), every account and
+// session appears to "vanish" and all logins fail with "Invalid username or
+// password". Fail loudly instead of silently starting against an empty DB.
+try {
+  const st = fs.statSync(dbPath);
+  if (st.size === 0 && fs.existsSync(dbPath + '-wal')) {
+    console.error(
+      `[FATAL] ${dbPath} is empty but ${dbPath}-wal still contains data.\n` +
+      'The main database file was likely deleted or truncated while the WAL\n' +
+      'held committed transactions. Restore it from a backup\n' +
+      '(scripts/restore.sh) BEFORE starting the API, or the site will run\n' +
+      'against an empty user table and every login will fail.'
+    );
+    process.exit(1);
+  }
+} catch { /* file doesn't exist yet — fresh install, fine */ }
+
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
@@ -251,6 +287,26 @@ async function initDb() {
     .run();
   if (normalized.changes > 0) {
     console.log(`Migration: normalized ${normalized.changes} proposed_by value(s) (e.g. "3.0" → "3")`);
+  }
+
+  // ── empty-database warning ───────────────────────────────────────────────
+  // If the users table is empty but real content exists elsewhere, the DB was
+  // almost certainly wiped/replaced (e.g. mchs.db deleted without its -wal,
+  // restored from a stale backup, or DATABASE_PATH pointing at the wrong file).
+  // Symptom users see: EVERY login fails with "Invalid username or password".
+  const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+  if (userCount === 0) {
+    const msgCount = db.prepare('SELECT COUNT(*) AS c FROM messages').get().c;
+    console.warn(
+      `[WARNING] ${dbPath} has ZERO user accounts` +
+      (msgCount > 0 ? ` but ${msgCount} message(s) — the database looks WIPED.` : ' (fresh install?)') +
+      '\n[WARNING] All logins will fail with "Invalid username or password".' +
+      '\n[WARNING] Restore accounts with: scripts/restore.sh <backup>  — or create an admin with:' +
+      '\n[WARNING]   DATABASE_PATH=' + JSON.stringify(dbPath) +
+      ' node -e "const{db}=require(\'./db\');const{hashPassword}=require(\'./auth\');' +
+      'db.prepare(`INSERT OR IGNORE INTO users (username,password_hash,full_name,verified,admin) VALUES (?,?,?,?,1,1)`)' +
+      '.run(\'carterherrault\',hashPassword(process.argv[1]),\'Carter Herrault\',1);console.log(\'admin created\')" \'<password>'
+    );
   }
 
   // Promote configured admin usernames (idempotent — runs on every startup)
