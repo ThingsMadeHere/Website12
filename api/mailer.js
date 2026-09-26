@@ -7,10 +7,15 @@
 //      to the address that owns the API key — perfect for admin notifications)
 //   2. SMTP_HOST       → any SMTP server (e.g. Gmail with an app password),
 //      using nodemailer. SMTP_USER / SMTP_PASS / SMTP_PORT / SMTP_SECURE.
+//      This is also how the portal talks to the self-hosted Mailcow box
+//      (mail.mchsrobotics.dev) — use port 587 (submission + STARTTLS); plain
+//      SMTP port 25 is NOT required and usually blocked by hosting providers.
 //   3. neither         → console fallback: the email (including approve/deny
 //      links) is printed to the server log so the flow still works in dev.
 //
 // EMAIL_FROM overrides the sender for either provider.
+// INBOUND_NOTIFY_EMAIL: address that gets pinged when the mailbox-server
+// delivers a fresh inbound team email into the portal's inbox folder.
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'physicsiscool314@gmail.com';
 
