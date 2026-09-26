@@ -79,14 +79,10 @@ function getJwtSecret() {
   return secret;
 }
 
-// ── join keys (small-team sign-in, self-service) ─────────────────────────────
-// Passwords are a bad fit for ~20 students on locked-down school Chromebooks:
-// they get reset by IT, forgotten over summer break, or shared verbally. So
-// the admin sets ONE shared team key (like a Wi-Fi password) in the Admin
-// panel — students pick a username and sign in with the key whenever they
-// like. Outsiders without the key can only submit a join application, which
-// an admin approves. The key is stored hashed (sha256); rotation never locks
-// out existing sessions. Passwords remain as a fallback for recovery accounts.
+// ── join keys (LEGACY — superseded by Google Sign-In, see googleAuth.js) ────
+// Kept so old databases keep opening and any scripted/recovery login still
+// works; the UI no longer offers this path. Passwords remain as a fallback
+// for recovery accounts.
 
 const KEY_TTL_DAYS = Math.max(1, parseInt(process.env.JOIN_KEY_TTL_DAYS, 10) || 180);
 const JOIN_KEY_SETTING = 'join_key';
@@ -283,7 +279,7 @@ function revokeUserSessions(userId) {
 module.exports = {
   hashPassword, verifyPassword, verifyPasswordFull, maybeUpgradePasswordHash,
   createSession, destroySession, resolveSessionToken,
-  requireAuth, requireAdmin, blockIfTimedOut, parseSqliteUtc,
+  requireAuth, requireAdmin, blockIfTimedOut, parseSqliteUtc, sqlUtcPlus,
   // join-key sign-in (small team, self-service)
   getJoinKeyInfo, setJoinKey, clearJoinKey, joinWithKey, normalizeKey,
   listUsersForAdmin, revokeUserSessions, KEY_TTL_DAYS, SESSION_TTL_DAYS,
