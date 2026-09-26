@@ -63,8 +63,50 @@ export default function LandingPage({ onVerified, onBack }) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // ── sign in ────────────────────────────────────────────────────────────────
+  // ── sign in (team key) ─────────────────────────────────────────────────────
+  // Small-team flow: username + the shared team key. No passwords, no per-login
+  // admin help. Correct key + new username = account created instantly. Wrong
+  // key + new username = a join request is opened for an admin to review.
   const handleLogin = async (e) => {
+    e.preventDefault();
+    setError('');
+    setAuthStep('loading');
+    try {
+      const res = await fetch(`${API}/login/join`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.code === 'apply') {
+          // A join request was raised for us — show the "pending review" screen.
+          setError('');
+          setAuthStep(data.applicationId ? 'applied' : 'form');
+          if (!data.applicationId) setError(data.error || 'Could not open a join request.');
+          return;
+        }
+        setError(data.error || 'Something went wrong');
+        setAuthStep('form');
+        return;
+      }
+      // An admin requires a password change before this account can sign in.
+      if (data.mustChangePassword) {
+        setNewPass('');
+        setConfirmPass('');
+        setAuthStep('reset');
+        return;
+      }
+      setAuthStep('done');
+      setTimeout(() => onVerified(data), 700);
+    } catch {
+      setError('Could not reach server. Try again.');
+      setAuthStep('form');
+    }
+  };
+
+  // ── advanced: legacy username + password (recovery/automation accounts) ────
+  const handlePasswordLogin = async (e) => {
     e.preventDefault();
     setError('');
     setAuthStep('loading');
@@ -80,7 +122,6 @@ export default function LandingPage({ onVerified, onBack }) {
         setAuthStep('form');
         return;
       }
-      // An admin requires a password change before this account can sign in.
       if (data.mustChangePassword) {
         setNewPass('');
         setConfirmPass('');
@@ -126,14 +167,13 @@ export default function LandingPage({ onVerified, onBack }) {
     }
   };
 
-  // ── apply to join ──────────────────────────────────────────────────────────
+  // ── apply to join (no password — approved members sign in with the team key) ─
   const handleApply = async (e) => {
     e.preventDefault();
     setError('');
 
     if (!fullName.trim())  { setError('Please enter your full name.'); return; }
     if (!username.trim())  { setError('Please choose a username.'); return; }
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
     if (!photo)            { setError('Please attach a photo of yourself — it is required for review.'); return; }
 
     setAuthStep('loading');
@@ -141,7 +181,7 @@ export default function LandingPage({ onVerified, onBack }) {
       const res = await fetch(`${API}/applications`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, fullName: fullName.trim(), photo }),
+        body: JSON.stringify({ username, fullName: fullName.trim(), photo }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -168,8 +208,8 @@ export default function LandingPage({ onVerified, onBack }) {
     : authStep === 'reset'
       ? 'An admin requires you to pick a new password before signing in.'
       : mode === 'login'
-        ? 'Sign in to access the team board.'
-        : 'Apply with your name and a photo — an admin reviews every application.';
+        ? 'Username + the team key. No passwords, no waiting for approval.'
+        : 'Tell us who you are — an admin reviews every request, then shares the team key.';
 
   const inputStyle = {
     background: 'var(--bg-overlay)',
@@ -321,7 +361,7 @@ export default function LandingPage({ onVerified, onBack }) {
                 ))}
               </div>
 
-              {/* ── Sign-in form ── */}
+              {/* ── Sign-in form (team key) ── */}
               {mode === 'login' && (
                 <form onSubmit={handleLogin} className="space-y-3">
                   <div>
@@ -341,13 +381,13 @@ export default function LandingPage({ onVerified, onBack }) {
                   </div>
 
                   <div>
-                    <label className="block text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Password</label>
+                    <label className="block text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Team key</label>
                     <div className="relative">
                       <input
                         type={showPass ? 'text' : 'password'}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        placeholder="••••••••"
+                        placeholder="the shared team key"
                         autoComplete="current-password"
                         required
                         className="w-full px-3 py-2.5 pr-10 rounded-lg text-sm outline-none transition-colors"
@@ -361,6 +401,15 @@ export default function LandingPage({ onVerified, onBack }) {
                         {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                    <p className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--text-subtle)' }}>
+                      The same key for everyone — like the workshop Wi-Fi. First time signing in with a new
+                      username? Your account is created automatically. Forgot the key? Ask any teammate or
+                      an admin, or {' '}
+                      <button type="button" onClick={() => { setMode('apply'); resetForm(); }}
+                        className="underline" style={{ color: 'var(--text-muted)' }}>
+                        request access
+                      </button>.
+                    </p>
                   </div>
 
                   {error && (
@@ -378,8 +427,25 @@ export default function LandingPage({ onVerified, onBack }) {
                     Sign In
                   </button>
 
+                  <details className="pt-1">
+                    <summary className="text-xs cursor-pointer select-none" style={{ color: 'var(--text-subtle)' }}>
+                      Advanced: sign in with a username &amp; password
+                    </summary>
+                    <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-subtle)' }}>
+                      For recovery and automation accounts only (seeded by an admin). Regular members
+                      should use the team key above.
+                    </p>
+                    <button type="button" onClick={handlePasswordLogin}
+                      className="w-full py-2 rounded-lg text-xs transition-colors mt-2"
+                      style={{ border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+                      onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+                      onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}>
+                      Try password sign-in
+                    </button>
+                  </details>
+
                   <p className="text-xs text-center pt-1" style={{ color: 'var(--text-subtle)' }}>
-                    No account yet?{' '}
+                    Not on the team yet?{' '}
                     <button type="button" onClick={() => { setMode('apply'); resetForm(); }}
                       className="underline transition-colors"
                       style={{ color: 'var(--text-muted)' }}>
@@ -427,35 +493,17 @@ export default function LandingPage({ onVerified, onBack }) {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>Password</label>
-                    <div className="relative">
-                      <input
-                        type={showPass ? 'text' : 'password'}
-                        value={password}
-                        onChange={e => setPassword(e.target.value)}
-                        placeholder="at least 6 characters"
-                        autoComplete="new-password"
-                        required
-                        minLength={6}
-                        className="w-full px-3 py-2.5 pr-10 rounded-lg text-sm outline-none transition-colors"
-                        style={inputStyle}
-                        onFocus={e => e.target.style.borderColor = 'var(--border-light)'}
-                        onBlur={e  => e.target.style.borderColor = 'var(--border)'}
-                      />
-                      <button type="button" onClick={() => setShowPass(p => !p)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2"
-                        style={{ color: 'var(--text-subtle)' }}>
-                        {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+                  <p className="text-xs leading-relaxed rounded-lg px-3 py-2.5"
+                     style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: 'var(--text-muted)' }}>
+                    No password needed. Once an admin approves your request, just sign in with this
+                    username and the team key (an admin or teammate will share it at your first meeting).
+                  </p>
 
-                  {/* Photo (required) */}
+                  {/* Photo (optional) */}
                   <div>
                     <label className="block text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>
-                      Photo of you <span style={{ color: '#dc2626' }}>*</span>{' '}
-                      <span style={{ color: 'var(--text-subtle)' }}>· reviewed by an admin</span>
+                      Photo of you{' '}
+                      <span style={{ color: 'var(--text-subtle)' }}>· optional, helps admins recognize you</span>
                     </label>
 
                     {photoBusy && (
@@ -557,7 +605,7 @@ export default function LandingPage({ onVerified, onBack }) {
               </p>
               <p className="text-xs leading-relaxed mb-5" style={{ color: 'var(--text-muted)' }}>
                 A team admin will review your name and photo. Once you're approved, come back
-                and sign in with the username and password you just chose.
+                and sign in with this username + the team key an admin shares with you.
               </p>
               <div className="space-y-2">
                 <button onClick={() => { setMode('login'); setAuthStep('form'); resetForm(); }}

@@ -12,7 +12,7 @@ const { sendMail } = require('./mailer');
 const {
   hashPassword, verifyPassword,
   createSession, destroySession, requireAuth, blockIfTimedOut,
-  generateLoginCode, redeemLoginCode, listLoginCodes, revokeLoginCode, CODE_TTL_DAYS,
+  getJoinKeyInfo, setJoinKey, clearJoinKey, joinWithKey, KEY_TTL_DAYS,
 } = require('./auth');
 const {
   attachDb, registerSubscription, removeSubscription, getSubscription, getSubscribedUserIds,
@@ -408,33 +408,35 @@ function decisionPage(ok, title, message) {
 </body></html>`;
 }
 
-// POST /api/applications  { username, password, fullName, photo: { mime, data(base64) } }
+// POST /api/applications  { username, fullName, photo? }
+// Manual-approval front door for people without the team key. No password —
+// approved applicants sign in with the key (an admin shares it at the next
+// meeting). Photo is now optional: small teams recognize their own members;
+// admins can still ask for one on the review card.
 app.post('/api/applications', (req, res) => {
-  const { username, password, fullName, photo } = req.body || {};
+  const { username, fullName, photo } = req.body || {};
 
   const cleaned = String(username || '').toLowerCase().trim();
-  if (!cleaned || !password)
-    return res.status(400).json({ error: 'username and password required' });
+  if (!cleaned)
+    return res.status(400).json({ error: 'username required' });
   if (!USERNAME_RE.test(cleaned))
     return res.status(400).json({ error: 'Username may only contain letters, numbers, and . _ - characters' });
-  if (String(password).length < 6)
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
   const name = String(fullName || '').trim().slice(0, 80);
   if (!name)
     return res.status(400).json({ error: 'Full name is required' });
 
-  const mime = (photo || {}).mime;
-  const ext  = PHOTO_MIMES[mime];
-  if (!ext)
-    return res.status(400).json({ error: 'A photo is required (JPG, PNG, WebP, or GIF)' });
-
-  let buf;
-  try { buf = Buffer.from(String((photo || {}).data || ''), 'base64'); } catch { buf = null; }
-  if (!buf || buf.length < 64)
-    return res.status(400).json({ error: 'Photo data is invalid' });
-  if (buf.length > MAX_PHOTO_BYTES)
-    return res.status(400).json({ error: 'Photo is too large (max 6 MB)' });
+  let mime = null, buf = null;
+  if (photo && photo.mime) {
+    const ext = PHOTO_MIMES[mime = photo.mime];
+    if (!ext)
+      return res.status(400).json({ error: 'Photo must be JPG, PNG, WebP, or GIF' });
+    try { buf = Buffer.from(String(photo.data || ''), 'base64'); } catch { buf = null; }
+    if (!buf || buf.length < 64)
+      return res.status(400).json({ error: 'Photo data is invalid' });
+    if (buf.length > MAX_PHOTO_BYTES)
+      return res.status(400).json({ error: 'Photo is too large (max 6 MB)' });
+  }
 
   if (db.prepare('SELECT id FROM users WHERE username = ?').get(cleaned))
     return res.status(409).json({ error: 'Username already taken' });
@@ -448,9 +450,9 @@ app.post('/api/applications', (req, res) => {
   const info = db
     .prepare(
       `INSERT INTO applications (username, full_name, password_hash, photo_mime, photo, token)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, '', ?, ?, ?)`
     )
-    .run(cleaned, name, hashPassword(String(password)), mime, buf, token);
+    .run(cleaned, name, mime, buf, token);
 
   const id         = info.lastInsertRowid;
   const base       = baseUrl(req);
@@ -612,52 +614,90 @@ function sessionPayload(user) {
   };
 }
 
-// POST /api/login/code  { username, code }
-// Small-team sign-in: an admin hands out short one-time codes (Admin panel →
-// "Login Codes"). The code proves "an admin says you're on the team"; the
-// typed username picks the account. No passwords to forget on a school
-// Chromebook. Sessions are long-lived — stay signed in until logout.
-app.post('/api/login/code', (req, res) => {
-  const { username, code } = req.body || {};
-  const result = redeemLoginCode(code, username);
+// POST /api/login/join  { username, key }
+// Small-team sign-in — self-service. The admin sets ONE shared "team key"
+// (Admin panel → Team Key, e.g. "ROBO-KEY-2026"). Students pick a username and
+// sign in with the key any time they like; no per-login admin help, nothing to
+// forget or burn. Correct key + unknown username = account created on the
+// spot. Wrong/missing key + unknown username = the join-application path opens
+// (that's where manual approval lives). Password login stays as the private
+// fallback for seeded/recovery accounts.
+app.post('/api/login/join', (req, res) => {
+  const { username, key } = req.body || {};
+  const result = joinWithKey(username, key);
+
+  if (result.pending)
+    return res.status(403).json({
+      code: 'pending',
+      error: 'Your application is still pending review — you can sign in once an admin approves it.',
+    });
+
+  if (result.apply) {
+    const uname = String(username || '').toLowerCase().trim();
+    // Raise (or reuse) a pending application so an admin sees them in the queue.
+    let appId = db
+      .prepare(`SELECT id FROM applications WHERE username = ? AND status = 'pending'`)
+      .get(uname)?.id;
+    if (!appId && /^[a-z0-9_]{3,20}$/.test(uname)) {
+      appId = Number(
+        db
+          .prepare(
+            `INSERT INTO applications (username, full_name, password_hash, token)
+             VALUES (?, ?, '', ?)`
+          )
+          .run(
+            uname,
+            `${uname} (join request from sign-in screen)`,
+            crypto.randomBytes(32).toString('hex')
+          ).lastInsertRowid
+      );
+    }
+    return res.status(403).json({
+      code: 'apply',
+      applicationId: appId ?? null,
+      error: appId
+        ? `That team key doesn't match. We've opened a join request for @${uname} — an admin will review it, then you'll get the current key.`
+        : "That team key doesn't match, and that username isn't valid. Ask a teammate for the current key.",
+    });
+  }
+
   if (result.error) return res.status(401).json({ error: result.error });
 
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.userId);
-  if (user.must_change_password) {
-    // legacy password-reset flag — clear it; code sign-in supersedes it
-    db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(user.id);
-  }
-  console.log(`@${user.username} signed in with a login code`);
+  console.log(`@${user.username} signed in with the team key${user.password_hash === '!join-key' ? ' (new account)' : ''}`);
   res.json(sessionPayload(user));
 });
 
-// ── login codes (admin-managed) ──────────────────────────────────────────────
+// ── team key (admin-managed) ─────────────────────────────────────────────────
 
-// POST /api/admin/login-codes  { note? } → generate a fresh one-time code
-app.post('/api/admin/login-codes', requireAuth, requireAdmin, (req, res) => {
-  const ttl = Math.min(30, Math.max(1, Number((req.body || {}).days) || CODE_TTL_DAYS));
-  const c = generateLoginCode(req.user.id, ttl);
-  console.log(`Login code ${c.formatted} generated by ${req.user.username} (valid ${ttl}d)`);
-  res.json({ ok: true, code: c.formatted, expiresAt: c.expiresAt });
+// GET /api/admin/join-key — status only; the key itself is stored hashed
+app.get('/api/admin/join-key', requireAuth, requireAdmin, (_, res) => {
+  const info = getJoinKeyInfo();
+  if (!info) return res.json({ set: false });
+  res.json({
+    set: true,
+    label: info.label,
+    createdAt: info.createdAt,
+    expiresAt: info.expiresAt,
+    expired: new Date(info.expiresAt.replace(' ', 'T') + 'Z').getTime() < Date.now(),
+  });
 });
 
-// GET /api/admin/login-codes — recent codes + who redeemed them
-app.get('/api/admin/login-codes', requireAuth, requireAdmin, (_, res) => {
-  res.json(listLoginCodes().map(r => ({
-    code: r.code,
-    createdAt: r.created_at,
-    expiresAt: r.expires_at,
-    usedAt: r.used_at,
-    createdBy: r.created_by_name || '',
-    usedBy: r.used_by_name || null,
-    active: !r.used_at && new Date(String(r.expires_at).replace(' ', 'T') + 'Z').getTime() > Date.now(),
-  })));
+// POST /api/admin/join-key  { key, label?, days? } — set or rotate the key.
+// Existing sessions stay valid; only NEW sign-ins need the new key.
+app.post('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
+  const body = req.body || {};
+  const ttl = Math.min(365, Math.max(1, Number(body.days) || KEY_TTL_DAYS));
+  const r = setJoinKey(body.key, req.user.id, body.label, ttl);
+  if (r.error) return res.status(400).json({ error: r.error });
+  console.log(`Team key rotated by ${req.user.username} (label "${r.label}", valid ${ttl}d)`);
+  res.json({ ok: true, label: r.label, createdAt: r.createdAt, expiresAt: r.expiresAt });
 });
 
-// DELETE /api/admin/login-codes/:code — revoke an unused code
-app.delete('/api/admin/login-codes/:code', requireAuth, requireAdmin, (req, res) => {
-  const removed = revokeLoginCode(req.params.code);
-  if (!removed) return res.status(404).json({ error: 'No unused code with that value' });
+// DELETE /api/admin/join-key — close self-service sign-in (applications still work)
+app.delete('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
+  clearJoinKey();
+  console.log(`Team key removed by ${req.user.username}`);
   res.json({ ok: true });
 });
 
