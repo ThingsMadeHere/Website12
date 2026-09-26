@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, Plus, ThumbsUp, ThumbsDown, Trash2, Vote, X as XIcon, CheckCircle2, RotateCcw, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, Plus, ThumbsUp, ThumbsDown, Trash2, Vote, X as XIcon, CheckCircle2, RotateCcw, Pencil, ExternalLink, UploadCloud } from 'lucide-react';
 import EventDialog from './EventDialog';
 import { apiFetch } from '../utils/api';
+
+// Deep link to a mirrored event on Google Calendar (works in browser + app).
+const gcalLink = (eventId) =>
+  `https://www.google.com/calendar/event?eid=${encodeURIComponent(eventId)}`;
 
 const fmtProposalDate = (d) => {
   const date = new Date(d);
@@ -49,6 +53,12 @@ export default function CalendarPage({ session, setCurrentView }) {
   }, []);
 
   useEffect(() => { loadEvents(); }, [loadEvents]);
+
+  // Google Calendar sync availability (hides the "on Google" badge when off)
+  const [gcalConfigured, setGcalConfigured] = useState(false);
+  useEffect(() => {
+    fetch('/api/gcal/config').then(r => r.ok ? r.json() : {}).then(d => setGcalConfigured(!!d.configured)).catch(() => {});
+  }, []);
 
   // ── voting ────────────────────────────────────────────────────────────────
   const handleVote = async (event, vote) => {
@@ -133,6 +143,27 @@ export default function CalendarPage({ session, setCurrentView }) {
     }
   };
 
+  // Admin/president: pull whatever is currently on the team's Google Calendar
+  // into the portal calendar (one-time / occasional import).
+  const [importing, setImporting] = useState(false);
+  const handleGcalImport = async () => {
+    setImporting(true);
+    try {
+      const res = await fetch('/api/gcal/import', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}` },
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(d.error || 'Could not import from Google Calendar'); return; }
+      alert(d.imported ? `Imported ${d.imported} event${d.imported > 1 ? 's' : ''} from Google Calendar.` : 'Nothing new to import — Google Calendar is already in sync.');
+      await loadEvents();
+    } catch {
+      alert('Could not reach the server for the Google Calendar import.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const canDeleteEvent = (ev) =>
     !!session && (session.admin ||
       (ev.proposedBy != null && Number(ev.proposedBy) === Number(session.userId)));
@@ -212,15 +243,30 @@ export default function CalendarPage({ session, setCurrentView }) {
               Join us for our weekly meetings and special events.
             </p>
           </div>
-          <button
-            onClick={() => setShowEventDialog(true)}
-            className="flex items-center justify-center gap-2 w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors"
-            style={{ background: '#16a34a', color: '#fff' }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#15803d'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = '#16a34a'; }}>
-            <Plus className="w-4 h-4" />
-            Add Event
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            {session?.admin && gcalConfigured && (
+              <button
+                onClick={handleGcalImport}
+                disabled={importing}
+                title="Pull events that exist on the team's Google Calendar into this portal calendar"
+                className="flex items-center justify-center gap-2 w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                style={{ background: 'var(--bg-base)', color: '#1a73e8', border: '1px solid rgba(26,115,232,0.35)' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#1a73e8'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(26,115,232,0.35)'; }}>
+                <UploadCloud className="w-4 h-4" />
+                {importing ? 'Importing…' : 'Import from Google'}
+              </button>
+            )}
+            <button
+              onClick={() => setShowEventDialog(true)}
+              className="flex items-center justify-center gap-2 w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: '#16a34a', color: '#fff' }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#15803d'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#16a34a'; }}>
+              <Plus className="w-4 h-4" />
+              Add Event
+            </button>
+          </div>
         </div>
 
         {/* Calendar */}
@@ -634,6 +680,14 @@ export default function CalendarPage({ session, setCurrentView }) {
                           <h4 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                             {ev.title}
                           </h4>
+                          {gcalConfigured && ev.gcalEventId && (
+                            <a href={gcalLink(ev.gcalEventId)} target="_blank" rel="noreferrer"
+                               title="Open this event on Google Calendar"
+                               className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-opacity hover:opacity-80"
+                               style={{ background: 'rgba(26,115,232,0.1)', color: '#1a73e8', border: '1px solid rgba(26,115,232,0.3)' }}>
+                              <ExternalLink className="w-3 h-3" /> on Google
+                            </a>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: 'var(--text-muted)' }}>
                           {fmtEventTime(ev.date) && (
