@@ -11,9 +11,11 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy": "scripts/pm2-deploy.sh",
-    "deploy:pull": "scripts/pm2-deploy.sh --pull",
-    "test:pm2": "scripts/pm2-test.sh",
+    "deploy": "scripts/deploy.sh",
+    "deploy:pull": "scripts/deploy.sh --pull",
+    "logs": "docker compose logs -f api",
+    "restart": "docker compose restart api",
+    "status": "docker compose ps",
     "healthcheck": "scripts/healthcheck.sh"
   },
   "dependencies": {

@@ -1,9 +1,24 @@
-// PM2 process definitions for MCHS Robotics site.
+// ⚠️  DEPRECATED — DO NOT USE IN PRODUCTION.
 //
-//   pm2 start ecosystem.config.js     # start everything
-//   pm2 restart mchs-api              # after pulling new backend code
-//   pm2 logs mchs-api                 # tail logs
-//   pm2 save && pm2 startup           # survive server reboots
+// The supported runtime is Docker Compose (see RUNTIME.md):
+//   scripts/deploy.sh          # full deploy: backup → build → rollout → verify
+//   docker compose logs -f api # replaces `pm2 logs`
+//   docker compose restart api # replaces `pm2 restart`
+//
+// Running PM2 alongside the compose stack causes exactly the conflicts that
+// made this setup painful: the `mchs-api` container owns host port 3001, so
+// the PM2 process crash-loops with EADDRINUSE, and PM2's bundled Node breaks
+// better-sqlite3 native modules. Pick ONE runtime — Docker.
+//
+// This file is kept ONLY as an emergency bare-metal fallback (e.g. Docker
+// daemon unavailable). If you must use it, first stop the compose API:
+//   docker compose stop api web
+//
+// Original usage:
+//   pm2 start ecosystem.config.cjs     # start everything
+//   pm2 restart mchs-api               # after pulling new backend code
+//   pm2 logs mchs-api                  # tail logs
+//   pm2 save && pm2 startup            # survive server reboots
 //
 // NOTE: the frontend is a static Vite build served by nginx from dist/,
 // so it does NOT need a PM2 process. Rebuild with `npm run build` after
