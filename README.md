@@ -113,6 +113,13 @@ Vite proxies `/api` → `http://localhost:3001` in dev (see `vite.config.js`).
 
 ## Production (Docker)
 
+**Docker Compose is the only supported runtime — PM2 has been retired.**
+It never keeps anything tied to your SSH window: every service uses
+`restart: unless-stopped`, so the Docker daemon (systemd-managed) revives
+them after crashes and reboots. See **[`RUNTIME.md`](RUNTIME.md)** for the
+one-time migration off PM2 and day-to-day commands
+(`docker compose logs -f api` replaces `pm2 logs`).
+
 The full protocol — first-time server setup, deploys, backups, rollback,
 CI/CD, monitoring — lives in **[`DEPLOYMENT.md`](DEPLOYMENT.md)**. The short
 version:
