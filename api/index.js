@@ -769,62 +769,84 @@ function sessionPayload(user) {
   };
 }
 
-// POST /api/login/join  { username, key }
-// Small-team sign-in — self-service. The admin sets ONE shared "team key"
-// (Admin panel → Team Key, e.g. "ROBO-KEY-2026"). Students pick a username and
-// sign in with the key any time they like; no per-login admin help, nothing to
-// forget or burn. Correct key + unknown username = account created on the
-// spot. Wrong/missing key + unknown username = the join-application path opens
-// (that's where manual approval lives). Password login stays as the private
-// fallback for seeded/recovery accounts.
-app.post('/api/login/join', authLimiter, (req, res) => {
-  const [data,] = validate(JoinLoginSchema, req, res);
-  if (!data) return;
-  const result = joinWithKey(data.username, data.key);
+// ── sign-in ──────────────────────────────────────────────────────────────────
+// Primary method: Google Sign-In (api/googleAuth.js). The browser gets an ID
+// token from Google Identity Services and posts it here; we verify it
+// server-side, gate by school domain (GOOGLE_ALLOWED_DOMAINS), create/link the
+// account, and hand back a session. No passwords, no team key, nothing to
+// forget on Chromebooks.
+//
+// Legacy paths kept for recovery/automation accounts and old scripts:
+//   POST /api/login        { username, password }  — bcrypt fallback
+//   POST /api/login/join   { username, key }       — old shared team key
+//   POST /api/password/reset                       — forced password change
 
+// GET /api/auth/config — what the sign-in screen needs to know (public).
+app.get('/api/auth/config', (_, res) => {
+  const configured = isGoogleConfigured();
+  res.json({
+    googleEnabled: configured,
+    // Only expose the client ID when Google sign-in actually works, so the
+    // frontend never renders a button that can only fail.
+    googleClientId: configured ? process.env.GOOGLE_CLIENT_ID : null,
+  });
+});
+
+// POST /api/auth/google  { credential }  (credential = Google ID token)
+// On success responds with the standard session payload AND sets an HttpOnly
+// cookie (mchs_gsid=<email>) so a returning user can complete sign-in with one
+// click — no popup, no interaction, safe for kiosk-style Chromebooks.
+app.post('/api/auth/google', authLimiter, async (req, res) => {
+  if (!isGoogleConfigured())
+    return res.status(503).json({ error: 'Google Sign-In is not configured on this server yet.' });
+
+  const credential = String((req.body || {}).credential || '');
+  const result = await loginWithGoogle(credential);
+
+  if (result.error && !result.denied && !result.pending)
+    return res.status(401).json({ error: result.error });
+  if (result.denied)
+    return res.status(403).json({ code: 'denied', email: result.email, error: result.error });
   if (result.pending)
-    return res.status(403).json({
-      code: 'pending',
-      error: 'Your application is still pending review — you can sign in once an admin approves it.',
-    });
+    return res.status(403).json({ code: 'pending', error: result.error });
 
-  if (result.apply) {
-    const uname = String(username || '').toLowerCase().trim();
-    // Raise (or reuse) a pending application so an admin sees them in the queue.
-    let appId = db
-      .prepare(`SELECT id FROM applications WHERE username = ? AND status = 'pending'`)
-      .get(uname)?.id;
-    if (!appId && /^[a-z0-9_]{3,20}$/.test(uname)) {
-      appId = Number(
-        db
-          .prepare(
-            `INSERT INTO applications (username, full_name, password_hash, token)
-             VALUES (?, ?, '', ?)`
-          )
-          .run(
-            uname,
-            `${uname} (join request from sign-in screen)`,
-            crypto.randomBytes(32).toString('hex')
-          ).lastInsertRowid
-      );
-    }
-    return res.status(403).json({
-      code: 'apply',
-      applicationId: appId ?? null,
-      error: appId
-        ? `That team key doesn't match. We've opened a join request for @${uname} — an admin will review it, then you'll get the current key.`
-        : "That team key doesn't match, and that username isn't valid. Ask a teammate for the current key.",
-    });
-  }
+  console.log(`@${result.user.username} signed in with Google <${result.user.email}>`);
+  res.cookie(GOOGLE_COOKIE, result.user.email, {
+    httpOnly: true, sameSite: 'lax', secure: isProd,
+    maxAge: SESSION_TTL_DAYS * 24 * 60 * 60 * 1000, path: '/',
+  });
+  res.json(sessionPayload(result.user));
+});
 
-  if (result.error) return res.status(401).json({ error: result.error });
+// POST /api/auth/google/quick  {} — silent re-auth for users who signed in
+// with Google before: the browser still has our HttpOnly cookie, so we mint a
+// fresh session without touching Google at all. Rate-limited + requires the
+// cookie to match an existing verified account.
+app.post('/api/auth/google/quick', authLimiter, (req, res) => {
+  const email = String(req.cookies?.[GOOGLE_COOKIE] || '').toLowerCase().trim();
+  if (!email) return res.status(401).json({ error: 'Not signed in' });
 
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.userId);
-  console.log(`@${user.username} signed in with the team key${user.password_hash === '!join-key' ? ' (new account)' : ''}`);
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  if (!user) return res.status(401).json({ error: 'Account not found — please sign in again.' });
+  if (!user.verified)
+    return res.status(403).json({ code: 'pending', error: 'Your account is still pending admin approval.' });
+
   res.json(sessionPayload(user));
 });
 
-// ── team key (admin-managed) ─────────────────────────────────────────────────
+// GET /api/auth/google/status — does this browser carry the quick-sign-in
+// cookie? Lets the landing page show a one-click "Continue as …" button.
+app.get('/api/auth/google/status', (req, res) => {
+  const email = String(req.cookies?.[GOOGLE_COOKIE] || '').toLowerCase().trim();
+  if (!email) return res.json({ remembered: false });
+  const user = db.prepare('SELECT username, full_name, verified FROM users WHERE email = ?').get(email);
+  if (!user) return res.json({ remembered: false });
+  res.json({ remembered: true, username: user.username, fullName: user.full_name || '', verified: !!user.verified });
+});
+
+// POST /api/logout also clears the quick-sign-in cookie (see below).
+
+// ── team key (LEGACY admin-managed) ──────────────────────────────────────────
 
 // GET /api/admin/join-key — status only; the key itself is stored hashed
 app.get('/api/admin/join-key', requireAuth, requireAdmin, (_, res) => {
@@ -858,7 +880,59 @@ app.delete('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/login  { username, password }
+// Legacy fallback: POST /api/login/join  { username, key } — the old shared
+// "team key" sign-in. Superseded by Google Sign-In; kept only so recovery/
+// automation scripts and old databases keep working. Not offered in the UI.
+app.post('/api/login/join', authLimiter, (req, res) => {
+  const [data,] = validate(JoinLoginSchema, req, res);
+  if (!data) return;
+  const result = joinWithKey(data.username, data.key);
+
+  if (result.pending)
+    return res.status(403).json({
+      code: 'pending',
+      error: 'Your application is still pending review — you can sign in once an admin approves it.',
+    });
+
+  if (result.apply) {
+    const uname = String(data.username || '').toLowerCase().trim();
+    // Raise (or reuse) a pending application so an admin sees them in the queue.
+    let appId = db
+      .prepare(`SELECT id FROM applications WHERE username = ? AND status = 'pending'`)
+      .get(uname)?.id;
+    if (!appId && /^[a-z0-9_]{3,20}$/.test(uname)) {
+      appId = Number(
+        db
+          .prepare(
+            `INSERT INTO applications (username, full_name, password_hash, token)
+             VALUES (?, ?, '', ?)`
+          )
+          .run(
+            uname,
+            `${uname} (join request from sign-in screen)`,
+            crypto.randomBytes(32).toString('hex')
+          ).lastInsertRowid
+      );
+    }
+    return res.status(403).json({
+      code: 'apply',
+      applicationId: appId ?? null,
+      error: appId
+        ? `That team key doesn't match. We've opened a join request for @${uname} — an admin will review it, then you'll get the current key.`
+        : "That team key doesn't match, and that username isn't valid. Ask a teammate for the current key.",
+    });
+  }
+
+  if (result.error) return res.status(401).json({ error: result.error });
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.userId);
+  console.log(`@${user.username} signed in with the legacy team key`);
+  res.json(sessionPayload(user));
+});
+
+// POST /api/login  { username, password } — legacy bcrypt sign-in kept for
+// recovery/automation accounts (and the E2E test suite). Regular members use
+// Google Sign-In above.
 app.post('/api/login', authLimiter, (req, res) => {
   const [data,] = validate(LoginSchema, req, res);
   if (!data) return;

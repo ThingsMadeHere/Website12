@@ -386,6 +386,15 @@ async function initDb() {
   for (const name of seed) insert.run(name, descriptions[name] || '');
 
   console.log('DB schema ready');
+
+  // Google Sign-In columns/table (email, picture_url, google_denied). Lazy
+  // require: googleAuth.js requires ./auth which requires ./db.
+  try {
+    require('./googleAuth').migrateGoogle(db);
+  } catch (err) {
+    console.error('Google Sign-In migration failed:', err.message);
+  }
+
   ensureRecurringMeetings();
 }
 
