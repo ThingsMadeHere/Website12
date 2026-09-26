@@ -1,15 +1,1 @@
-# Dependencies
-node_modules/
-
-# Build artifacts
-dist/
-
-# Environment and Data
-postgres-data/
-backups/
-*.db
-*.db-shm
-*.db-wal
-
-# Archives
-*.zip
+(empty)
