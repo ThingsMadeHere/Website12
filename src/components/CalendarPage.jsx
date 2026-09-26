@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, Plus, ThumbsUp, ThumbsDown, Trash2, Vote, X as XIcon, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, MapPin, Plus, ThumbsUp, ThumbsDown, Trash2, Vote, X as XIcon, CheckCircle2, RotateCcw, Pencil } from 'lucide-react';
 import EventDialog from './EventDialog';
+import { apiFetch } from '../utils/api';
 
 const fmtProposalDate = (d) => {
   const date = new Date(d);
@@ -17,6 +18,7 @@ export default function CalendarPage({ session, setCurrentView }) {
   const [showEventDialog, setShowEventDialog] = useState(false);
   const [busyEventId, setBusyEventId] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null); // Date | null → day-detail modal
+  const [editingEvent, setEditingEvent] = useState(null); // event row → EventDialog edit mode
 
   // Load events (+ vote tallies for pending proposals).
   // Defined at component scope so the dialog's onEventCreated can call it.
@@ -64,15 +66,8 @@ export default function CalendarPage({ session, setCurrentView }) {
         alert(d.error || 'Could not vote');
         return;
       }
-      const totals = await res.json();
-      // majority reached? → promote to the calendar (server double-checks)
-      const majority = Math.floor((totals.total_votes || 0) / 2) + 1;
-      if ((totals.yes_votes || 0) >= majority) {
-        await fetch(`/api/events/${event.id}/approve`, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${session.token}` },
-        }).catch(() => {});
-      }
+      // The server promotes the proposal itself once a majority is reached
+      // (single source of truth — no second round-trip needed here).
       await loadEvents();
     } catch {
       /* ignore */
@@ -119,6 +114,20 @@ export default function CalendarPage({ session, setCurrentView }) {
       await loadEvents();
     } catch {
       /* ignore */
+    } finally {
+      setBusyEventId(null);
+    }
+  };
+
+  // Admin: send an approved event back to pending (re-open voting).
+  const handleUnapprove = async (event) => {
+    if (!window.confirm(`Send "${event.title}" back to voting?`)) return;
+    setBusyEventId(event.id);
+    try {
+      await apiFetch(`/api/events/${event.id}`, { method: 'PUT', body: { status: 'pending' }, token: session.token });
+      await loadEvents();
+    } catch (err) {
+      alert(err.message || 'Could not update event');
     } finally {
       setBusyEventId(null);
     }
@@ -222,7 +231,7 @@ export default function CalendarPage({ session, setCurrentView }) {
             </h2>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)))}
+                onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
                 className="p-2 rounded-lg transition-colors"
                 style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--text-subtle)'; }}
@@ -230,7 +239,7 @@ export default function CalendarPage({ session, setCurrentView }) {
                 <ChevronLeft className="w-4 h-4" style={{ color: 'var(--text-primary)' }} />
               </button>
               <button
-                onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)))}
+                onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
                 className="p-2 rounded-lg transition-colors"
                 style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--text-subtle)'; }}
@@ -482,7 +491,7 @@ export default function CalendarPage({ session, setCurrentView }) {
                               : 'no votes yet'
                             : needed > 0
                               ? `needs ${needed} more 👍 for majority`
-                              : 'majority reached — approving…'}
+                              : 'majority reached ✓'}
                         </p>
                       </div>
                     </div>
@@ -649,16 +658,38 @@ export default function CalendarPage({ session, setCurrentView }) {
                           </p>
                         )}
                       </div>
-                      {canDeleteEvent(ev) && (
-                        <button onClick={() => handleDeleteEvent(ev)} disabled={busyEventId === ev.id}
-                          title={session?.admin ? 'Delete event (admin)' : 'Delete your event'}
-                          className="p-1.5 rounded-lg transition-colors shrink-0 disabled:opacity-50"
-                          style={{ color: 'var(--text-subtle)', border: '1px solid var(--border)' }}
-                          onMouseEnter={e => { e.currentTarget.style.color = '#dc2626'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-subtle)'; e.currentTarget.style.borderColor = 'var(--border)'; }}>
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {session && (session.admin || (ev.proposedBy != null && Number(ev.proposedBy) === Number(session.userId))) && (
+                          <button onClick={() => setEditingEvent(ev)} disabled={busyEventId === ev.id}
+                            title="Edit event"
+                            className="p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                            style={{ color: 'var(--text-subtle)', border: '1px solid var(--border)' }}
+                            onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-subtle)'; }}>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {session?.admin && (
+                          <button onClick={() => handleUnapprove(ev)} disabled={busyEventId === ev.id}
+                            title="Send back to voting"
+                            className="p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                            style={{ color: 'var(--text-subtle)', border: '1px solid var(--border)' }}
+                            onMouseEnter={e => { e.currentTarget.style.color = '#a16207'; }}
+                            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-subtle)'; }}>
+                            <RotateCcw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {canDeleteEvent(ev) && (
+                          <button onClick={() => handleDeleteEvent(ev)} disabled={busyEventId === ev.id}
+                            title={session?.admin ? 'Delete event (admin)' : 'Delete your event'}
+                            className="p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                            style={{ color: 'var(--text-subtle)', border: '1px solid var(--border)' }}
+                            onMouseEnter={e => { e.currentTarget.style.color = '#dc2626'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-subtle)'; e.currentTarget.style.borderColor = 'var(--border)'; }}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -705,12 +736,20 @@ export default function CalendarPage({ session, setCurrentView }) {
         );
       })()}
 
-      {/* Event Creation Dialog */}
-      {showEventDialog && session && (
+      {/* Event Creation / Edit Dialog */}
+      {showEventDialog && session && !editingEvent && (
         <EventDialog
           session={session}
           onClose={() => setShowEventDialog(false)}
           onEventCreated={() => { loadEvents(); }}
+        />
+      )}
+      {editingEvent && session && (
+        <EventDialog
+          session={session}
+          existing={editingEvent}
+          onClose={() => setEditingEvent(null)}
+          onEventCreated={() => { setEditingEvent(null); loadEvents(); }}
         />
       )}
       

@@ -180,6 +180,18 @@ async function initDb() {
       PRIMARY KEY (series, date)
     );
 
+    -- Login codes: the small-team sign-in method. An admin generates a short
+    -- one-time code (e.g. "ROBO-4F2K") that works for ANY username — no
+    -- passwords to remember, reset, or share on locked-down school Chromebooks.
+    CREATE TABLE IF NOT EXISTS login_codes (
+      code        TEXT        PRIMARY KEY,          -- normalized XXXX-XXXX
+      created_by  INTEGER     NOT NULL REFERENCES users(id),
+      used_by     INTEGER,                          -- set when redeemed
+      used_at     TEXT,
+      expires_at  TEXT        NOT NULL,             -- SQLite UTC
+      created_at  TEXT        NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- User availability blocks for scheduling
     CREATE TABLE IF NOT EXISTS user_availability (
       id          INTEGER     PRIMARY KEY AUTOINCREMENT,
@@ -288,6 +300,16 @@ async function initDb() {
   if (normalized.changes > 0) {
     console.log(`Migration: normalized ${normalized.changes} proposed_by value(s) (e.g. "3.0" → "3")`);
   }
+
+  // Login codes live alongside passwords (passwords remain the admin fallback).
+  db.exec(`CREATE TABLE IF NOT EXISTS login_codes (
+    code        TEXT        PRIMARY KEY,
+    created_by  INTEGER     NOT NULL REFERENCES users(id),
+    used_by     INTEGER,
+    used_at     TEXT,
+    expires_at  TEXT        NOT NULL,
+    created_at  TEXT        NOT NULL DEFAULT (datetime('now'))
+  )`);
 
   // ── empty-database warning ───────────────────────────────────────────────
   // If the users table is empty but real content exists elsewhere, the DB was
