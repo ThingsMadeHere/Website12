@@ -149,10 +149,29 @@ proxy at 3002.
 
 ### `[PM2][ERROR] Process with pid NNNN already exists` / `Cannot read properties of undefined (reading 'pm2_env')`
 
-Stale PM2 daemon state after repeated crash-loops. Reset it:
+Stale/corrupt PM2 daemon state after repeated crash-loops. The dump file in
+`~/.pm2` still references PIDs that no longer exist, so `pm2 start` refuses to
+adopt them and `pm2 save` crashes inside `speedList()` when it hits a ghost
+entry without `pm2_env`. One-command fix:
 
 ```bash
-pm2 kill        # kills the daemon (does NOT touch Docker containers)
+scripts/pm2-reset.sh            # pm2 kill + wipe ~/.pm2 + fresh start + pm2 save
+scripts/pm2-reset.sh --kill-orphans   # also kill stray `node index.js` runs holding :3001
+```
+
+Manual equivalent if you prefer:
+
+```bash
+pm2 kill                        # kills the daemon (does NOT touch Docker containers)
+rm -rf ~/.pm2                   # removes the corrupt dump.pm2 state
 pm2 start ecosystem.config.cjs
 pm2 save
+```
+
+If the API port 3001 was held by an orphaned process (started by hand, not via
+PM2), check first — otherwise the new process crash-loops with `EADDRINUSE`:
+
+```bash
+pgrep -af "node.*index.js"      # anything here survived `pm2 kill` → pkill it
+lsof -i :3001
 ```
