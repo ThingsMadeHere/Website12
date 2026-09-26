@@ -180,15 +180,21 @@ async function initDb() {
       PRIMARY KEY (series, date)
     );
 
-    -- Login codes: the small-team sign-in method. An admin generates a short
-    -- one-time code (e.g. "ROBO-4F2K") that works for ANY username — no
-    -- passwords to remember, reset, or share on locked-down school Chromebooks.
+    -- Settings: simple key/value store. Currently holds the team "join key"
+    -- record (JSON, hashed) used by the self-service small-team sign-in.
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    -- Legacy one-time login codes (superseded by the join key; kept so old
+    -- databases open cleanly — nothing reads or writes this table anymore).
     CREATE TABLE IF NOT EXISTS login_codes (
-      code        TEXT        PRIMARY KEY,          -- normalized XXXX-XXXX
+      code        TEXT        PRIMARY KEY,
       created_by  INTEGER     NOT NULL REFERENCES users(id),
-      used_by     INTEGER,                          -- set when redeemed
+      used_by     INTEGER,
       used_at     TEXT,
-      expires_at  TEXT        NOT NULL,             -- SQLite UTC
+      expires_at  TEXT        NOT NULL,
       created_at  TEXT        NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -301,7 +307,15 @@ async function initDb() {
     console.log(`Migration: normalized ${normalized.changes} proposed_by value(s) (e.g. "3.0" → "3")`);
   }
 
-  // Login codes live alongside passwords (passwords remain the admin fallback).
+  // Settings key/value store (join key lives here). Also present in the main
+  // schema above; this re-run lets older databases pick it up without a dump.
+  db.exec(`CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`);
+
+  // Legacy one-time login codes (superseded by the join key; kept so old
+  // databases open cleanly — nothing reads or writes this table anymore).
   db.exec(`CREATE TABLE IF NOT EXISTS login_codes (
     code        TEXT        PRIMARY KEY,
     created_by  INTEGER     NOT NULL REFERENCES users(id),
