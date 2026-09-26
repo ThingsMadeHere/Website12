@@ -55,14 +55,24 @@ check_once() {
   echo "$body" | grep -q '"count"' || { echo "FAIL  /api/users/count bad body: $body"; return 1; }
   echo "ok    web → api proxy (/api/users/count)"
 
-  # 4. Container state (skipped when docker is unavailable, e.g. bare metal)
-  if command -v docker >/dev/null 2>&1 && docker compose ps >/dev/null 2>&1; then
-    local state health
+  # 4. Process/container state — runtime-aware:
+  #    Docker path: api container must be "healthy", web must be "running".
+  #    PM2 path (bare metal): mchs-api process must be "online".
+  #    The name match is substring so both "mchs-api" (compose) and
+  #    "api-1"/"web-1" (compose v2 naming) are covered.
+  if command -v docker >/dev/null 2>&1 && docker compose ps >/dev/null 2>&1 \
+     && docker compose ps --format '{{.Name}}' 2>/dev/null | grep -Eq 'api|web'; then
+    local state
     state="$(docker compose ps --format '{{.Name}} {{.State}} {{.Health}}' 2>/dev/null)"
-    if echo "$state" | grep -q "mchs-api"; then
-      echo "$state" | grep "mchs-api" | grep -q "healthy" || { echo "FAIL  mchs-api container not healthy:"; echo "$state" | grep mchs-api; return 1; }
-      echo "$state" | grep "mchs-web" | grep -q "running" || { echo "FAIL  mchs-web container not running:"; echo "$state" | grep mchs-web; return 1; }
-      echo "ok    containers healthy"
+    echo "$state" | grep -E 'api' | grep -q 'healthy\|running' || { echo "FAIL  api container not healthy/running:"; echo "$state"; return 1; }
+    echo "$state" | grep -E 'web'  | grep -q 'running'          || { echo "FAIL  web container not running:"; echo "$state"; return 1; }
+    echo "ok    containers healthy (docker)"
+  elif command -v pm2 >/dev/null 2>&1; then
+    local pstat
+    pstat="$(pm2 jlist 2>/dev/null | python3 -c 'import json,sys;[print(p["name"],p["pm2_env"]["status"]) for p in json.load(sys.stdin)]' 2>/dev/null || true)"
+    if echo "$pstat" | grep -q '^mchs-api '; then
+      echo "$pstat" | grep '^mchs-api ' | grep -q 'online' || { echo "FAIL  pm2 mchs-api not online: $pstat"; return 1; }
+      echo "ok    pm2 mchs-api online"
     fi
   fi
 
