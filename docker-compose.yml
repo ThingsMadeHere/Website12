@@ -29,6 +29,8 @@ services:
       DATABASE_PATH: /app/data/mchs.db
       PORT: "3001"
       COMPILER_QUEUE_DIR: /app/queue
+      COMPILER_OUTPUT_DIR: /app/output
+      DEV_WORKSPACES_ROOT: /app/workspaces
       SSH_HOST: wplib-ssh
       SSH_PORT: "2222"
       SSH_PRIVATE_KEY: /workspace/ssh-keys/id_ed25519
@@ -44,6 +46,12 @@ services:
     volumes:
       - api_data:/app/data
       - compiler_queue:/app/queue
+      # Build logs/artifacts, read-only (for job status + artifact download)
+      - compiler_output:/app/output:ro
+      # Student workspaces — MUST be at the same path the compiler container
+      # mounts them at (/app/workspaces), because the API writes absolute
+      # WORKSPACE_PATH values into the queue jobs it enqueues.
+      - wplib_workspaces:/app/workspaces
       - ./ssh-keys:/workspace/ssh-keys:rw
     networks:
       - proxy
