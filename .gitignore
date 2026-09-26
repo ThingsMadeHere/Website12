@@ -1,18 +1,5 @@
 # Dependencies
 node_modules/
 
-# Compiled/Binary files
-*.o
-*.obj
-*.a
-*.so
-*.dll
-*.exe
-*.out
-*.class
-*.pyc
-
-# Build artifacts
-build/
-dist/
-target/
+# Temp files
+tmp/

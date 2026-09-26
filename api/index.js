@@ -4,14 +4,17 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const express = require('express');
 const cors    = require('cors');
+const helmet  = require('helmet');
+const rateLimit = require('express-rate-limit');
+const { z }   = require('zod');
 const crypto  = require('crypto');
 const fs      = require('fs');
 const path    = require('path');
 const { db, initDb, ADMIN_USERNAMES, ensureRecurringMeetings } = require('./db');
 const { sendMail } = require('./mailer');
 const {
-  hashPassword, verifyPassword,
-  createSession, destroySession, requireAuth, blockIfTimedOut,
+  hashPassword, verifyPassword, maybeUpgradePasswordHash,
+  createSession, destroySession, requireAuth, requireAdmin, blockIfTimedOut,
   getJoinKeyInfo, setJoinKey, clearJoinKey, joinWithKey, KEY_TTL_DAYS,
 } = require('./auth');
 const {
@@ -31,9 +34,169 @@ const PORT = parseInt(process.env.PORT, 10) || 3001;
 // Push subscriptions are stored in SQLite — hand the handle to the push module.
 attachDb(db);
 
-app.set('trust proxy', true); // honor X-Forwarded-Proto behind nginx/caddy
+// Behind ONE reverse proxy (nginx/Caddy in front of PM2). `true` (= hop count
+// ∞) lets any client spoof X-Forwarded-* and breaks the rate limiter's IP
+// keying; 1 is the correct setting for a single trusted proxy.
+app.set('trust proxy', 1);
+// Standard security headers on API responses. contentSecurityPolicy is left
+// off: this origin also serves the Vite-built frontend, whose CSP belongs to
+// the static host (nginx/Caddy), not the API.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '15mb' })); // applications carry base64 photos
+
+// ── input validation (zod) ───────────────────────────────────────────────────
+// Replaces hand-rolled typeof/regex checks scattered across the routes.
+// Usage: const [data, errResponse] = validate(LoginSchema, req, res);
+function validate(schema, req, res) {
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    res.status(400).json({ error: `${first.path.join('.') || 'body'}: ${first.message}` });
+    return [null, undefined];
+  }
+  return [parsed.data, null];
+}
+
+const UsernameSchema = z.string().trim().toLowerCase()
+  .min(1, 'required').max(32, 'may be at most 32 characters')
+  .regex(/^[a-z0-9._-]+$/, 'may only contain letters, numbers, and . _ - characters');
+
+const LoginSchema = z.object({
+  username: UsernameSchema,
+  password: z.string().min(1, 'required').max(200),
+});
+
+const JoinLoginSchema = z.object({
+  username: z.string().trim().toLowerCase().min(3).max(20)
+    .regex(/^[a-z0-9_]+$/, 'Usernames: 3–20 letters, numbers, or underscores.'),
+  key: z.string().min(1, 'Enter the team key.').max(100),
+});
+
+const PasswordResetSchema = z.object({
+  username: UsernameSchema,
+  currentPassword: z.string().min(1, 'required').max(200),
+  newPassword: z.string().min(6, 'New password must be at least 6 characters').max(200),
+});
+
+const PhotoSchema = z.object({
+  mime: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+  data: z.string().min(64, 'Photo data is invalid'),
+});
+
+const ApplicationSchema = z.object({
+  username: UsernameSchema,
+  fullName: z.string().trim().min(1, 'Full name is required').max(80),
+  photo: PhotoSchema.optional(),
+});
+
+const NotificationSettingsSchema = z.object({
+  settings: z.enum(['all', 'mentions_only', 'none']),
+});
+
+const ProfileSchema = z.object({
+  fullName: z.string().trim().min(1, 'Full name is required').max(80),
+});
+
+const ProfilePhotoSchema = z.object({ photo: PhotoSchema });
+
+const ChannelSchema = z.object({
+  name: z.string().min(2, 'Channel name must be at least 2 characters (letters/numbers only)').max(64),
+  description: z.string().max(200).optional().default(''),
+});
+
+const MessageSchema = z.object({
+  body: z.string().trim().min(1, 'Message is empty').max(2000, 'Message is too long (max 2000 characters)'),
+});
+
+const AvailabilitySchema = z.object({
+  title: z.string().max(120).optional().nullable(),
+  date: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?)?$/, 'date must look like 2026-04-10 or 2026-04-10T16:00'),
+  startTime: z.string().regex(/^([0-9]{2}:[0-9]{2})?$/, 'HH:MM').optional().nullable(),
+  endTime: z.string().regex(/^([0-9]{2}:[0-9]{2})?$/, 'HH:MM').optional().nullable(),
+  location: z.string().max(120).optional().nullable(),
+  repeatType: z.enum(['none', 'weekly', 'monthly']).optional().default('none'),
+}).refine(d => d.date, { message: 'Date is required' });
+
+const EventCreateSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(200),
+  description: z.string().max(5000).optional().default(''),
+  date: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?)?$/, 'date must look like 2026-04-10 or 2026-04-10T16:00'),
+  location: z.string().max(200).optional().default(''),
+  type: z.enum(['meeting', 'event', 'workshop', 'competition']).optional().default('meeting'),
+  push: z.boolean().optional().default(false),
+});
+
+const EventUpdateSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(200).optional(),
+  description: z.string().max(5000).optional(),
+  date: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2})?)?$/, 'date must look like 2026-04-10 or 2026-04-10T16:00').optional(),
+  location: z.string().max(200).optional(),
+  type: z.enum(['meeting', 'event', 'workshop', 'competition']).optional(),
+  status: z.enum(['pending', 'approved', 'rejected']).optional(),
+});
+
+const VoteSchema = z.object({ vote: z.union([z.literal(1), z.literal(-1)]) });
+
+const DecisionSchema = z.object({ action: z.enum(['approve', 'deny']) });
+
+const AdminUserCreateSchema = z.object({
+  username: UsernameSchema,
+  password: z.string().min(6, 'Password must be at least 6 characters').max(200),
+  fullName: z.string().trim().max(80).optional().default(''),
+  photo: PhotoSchema.nullable().optional(),
+  tags: z.array(z.any()).optional().default([]),
+  verified: z.boolean().optional(),
+  mustChangePassword: z.boolean().optional().default(false),
+});
+
+const AdminUserPatchSchema = z.object({
+  username: UsernameSchema.optional(),
+  fullName: z.string().trim().max(80).optional(),
+  verified: z.boolean().optional(),
+  password: z.string().min(6, 'Password must be at least 6 characters').max(200).optional(),
+  mustChangePassword: z.boolean().optional(),
+  photo: PhotoSchema.nullable().optional(),
+}).refine(d => Object.keys(d).length > 0, { message: 'Nothing to update' });
+
+const TimeoutSchema = z.object({
+  minutes: z.number().int().min(1, 'minutes must be between 1 and 527040 (1 year)')
+    .max(60 * 24 * 366, 'minutes must be between 1 and 527040 (1 year)').optional(),
+  until: z.string().datetime({ offset: true }).or(z.string().min(4)).optional(),
+  clear: z.boolean().optional(),
+});
+
+const JoinKeySetSchema = z.object({
+  key: z.string().min(6, 'The team key should be at least 6 characters (letters and numbers).').max(100),
+  label: z.string().max(60).optional().default(''),
+  days: z.number().int().min(1).max(365).optional(),
+});
+
+const PushSubscribeSchema = z.object({
+  subscription: z.object({
+    endpoint: z.string().url('Invalid subscription object').max(2048),
+    keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }).partial().optional(),
+  }),
+});
+
+// ── rate limits (express-rate-limit) ─────────────────────────────────────────
+// Auth endpoints were previously unlimited — trivial to brute-force the team
+// key or member passwords. trust proxy=1 above makes the client IP correct
+// behind nginx/Caddy so these limits actually key on real clients.
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 300, standardHeaders: 'draft-7', legacyHeaders: false,
+  message: { error: 'Too many requests — please slow down.' },
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20, skipSuccessfulRequests: true,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  message: { error: 'Too many sign-in attempts. Try again in a few minutes.' },
+});
+const messageLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 20, standardHeaders: 'draft-7', legacyHeaders: false,
+  message: { error: 'You are sending messages too quickly — take a breath.' },
+});
+app.use('/api', generalLimiter);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -343,11 +506,6 @@ const esc = (s) => String(s)
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 
-function requireAdmin(req, res, next) {
-  if (!req.user?.admin) return res.status(403).json({ error: 'Admin only' });
-  next();
-}
-
 function approveApplication(application, decidedBy = null) {
   const clash = db.prepare('SELECT id FROM users WHERE username = ?').get(application.username);
   if (clash) return { error: `Username '${application.username}' is already taken — cannot approve` };
@@ -413,25 +571,18 @@ function decisionPage(ok, title, message) {
 // approved applicants sign in with the key (an admin shares it at the next
 // meeting). Photo is now optional: small teams recognize their own members;
 // admins can still ask for one on the review card.
-app.post('/api/applications', (req, res) => {
-  const { username, fullName, photo } = req.body || {};
+app.post('/api/applications', authLimiter, (req, res) => {
+  const [data,] = validate(ApplicationSchema, req, res);
+  if (!data) return;
 
-  const cleaned = String(username || '').toLowerCase().trim();
-  if (!cleaned)
-    return res.status(400).json({ error: 'username required' });
-  if (!USERNAME_RE.test(cleaned))
-    return res.status(400).json({ error: 'Username may only contain letters, numbers, and . _ - characters' });
+  const cleaned = data.username;
+  const name = data.fullName;
 
-  const name = String(fullName || '').trim().slice(0, 80);
-  if (!name)
-    return res.status(400).json({ error: 'Full name is required' });
-
-  let mime = null, buf = null;
-  if (photo && photo.mime) {
-    const ext = PHOTO_MIMES[mime = photo.mime];
-    if (!ext)
-      return res.status(400).json({ error: 'Photo must be JPG, PNG, WebP, or GIF' });
-    try { buf = Buffer.from(String(photo.data || ''), 'base64'); } catch { buf = null; }
+  let mime = null, buf = null, ext = null;
+  if (data.photo) {
+    mime = data.photo.mime;
+    ext = PHOTO_MIMES[mime]; // already whitelisted by the schema
+    try { buf = Buffer.from(data.photo.data, 'base64'); } catch { buf = null; }
     if (!buf || buf.length < 64)
       return res.status(400).json({ error: 'Photo data is invalid' });
     if (buf.length > MAX_PHOTO_BYTES)
@@ -466,7 +617,7 @@ app.post('/api/applications', (req, res) => {
     `Name:      ${name}`,
     `Username:  @${cleaned}`,
     `Submitted: ${when}`,
-    'Photo:     attached',
+    `Photo:     ${buf ? 'attached' : 'not provided'}`,
     '',
     `Approve: ${approveUrl}`,
     `Deny:    ${denyUrl}`,
@@ -502,7 +653,7 @@ app.post('/api/applications', (req, res) => {
     subject: `Approve or deny: ${name} (@${cleaned}) — MCHS Robotics application`,
     text,
     html,
-    attachments: [{ filename: `applicant-${id}-${cleaned}.${ext}`, content: buf.toString('base64') }],
+    attachments: buf ? [{ filename: `applicant-${id}-${cleaned}.${ext}`, content: buf.toString('base64') }] : [],
   })
     .then(r => {
       if (!r.sent)
@@ -522,7 +673,10 @@ app.get('/api/applications/:id/decision', (req, res) => {
   const row = db.prepare('SELECT * FROM applications WHERE id = ?').get(Number(req.params.id));
   res.type('html');
 
-  if (!row || row.token !== String(req.query.token || ''))
+  const providedTok = Buffer.from(String(req.query.token || ''));
+  const expectedTok = Buffer.from(String(row?.token ?? ''));
+  const tokenOk = providedTok.length === expectedTok.length && crypto.timingSafeEqual(providedTok, expectedTok);
+  if (!row || !tokenOk)
     return res.status(400).send(decisionPage(false, 'Invalid link', 'This approval link is invalid or has already been replaced. Review the application from the Applications page instead.'));
 
   if (row.status !== 'pending')
@@ -577,7 +731,9 @@ app.post('/api/applications/:id/decision', requireAuth, requireAdmin, (req, res)
   if (row.status !== 'pending')
     return res.status(409).json({ error: `Application was already ${row.status}` });
 
-  const action = String((req.body || {}).action || '');
+  const [decisionData,] = validate(DecisionSchema, req, res);
+  if (!decisionData) return;
+  const action = decisionData.action;
   if (action === 'approve') {
     const result = approveApplication(row, req.user.id);
     if (result.error) return res.status(409).json({ error: result.error });
@@ -589,7 +745,6 @@ app.post('/api/applications/:id/decision', requireAuth, requireAdmin, (req, res)
     console.log(`Application #${row.id} denied by ${req.user.username}`);
     return res.json({ ok: true, status: 'denied' });
   }
-  return res.status(400).json({ error: "action must be 'approve' or 'deny'" });
 });
 
 // ── accounts ─────────────────────────────────────────────────────────────────
@@ -622,9 +777,10 @@ function sessionPayload(user) {
 // spot. Wrong/missing key + unknown username = the join-application path opens
 // (that's where manual approval lives). Password login stays as the private
 // fallback for seeded/recovery accounts.
-app.post('/api/login/join', (req, res) => {
-  const { username, key } = req.body || {};
-  const result = joinWithKey(username, key);
+app.post('/api/login/join', authLimiter, (req, res) => {
+  const [data,] = validate(JoinLoginSchema, req, res);
+  if (!data) return;
+  const result = joinWithKey(data.username, data.key);
 
   if (result.pending)
     return res.status(403).json({
@@ -686,8 +842,9 @@ app.get('/api/admin/join-key', requireAuth, requireAdmin, (_, res) => {
 // POST /api/admin/join-key  { key, label?, days? } — set or rotate the key.
 // Existing sessions stay valid; only NEW sign-ins need the new key.
 app.post('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
-  const body = req.body || {};
-  const ttl = Math.min(365, Math.max(1, Number(body.days) || KEY_TTL_DAYS));
+  const [body,] = validate(JoinKeySetSchema, req, res);
+  if (!body) return;
+  const ttl = body.days || KEY_TTL_DAYS;
   const r = setJoinKey(body.key, req.user.id, body.label, ttl);
   if (r.error) return res.status(400).json({ error: r.error });
   console.log(`Team key rotated by ${req.user.username} (label "${r.label}", valid ${ttl}d)`);
@@ -702,12 +859,11 @@ app.delete('/api/admin/join-key', requireAuth, requireAdmin, (req, res) => {
 });
 
 // POST /api/login  { username, password }
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password)
-    return res.status(400).json({ error: 'username and password required' });
+app.post('/api/login', authLimiter, (req, res) => {
+  const [data,] = validate(LoginSchema, req, res);
+  if (!data) return;
 
-  const uname = username.toLowerCase().trim();
+  const uname = data.username;
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(uname);
 
   if (!user) {
@@ -733,7 +889,8 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
 
-  if (!verifyPassword(password, user.password_hash))
+  // bcrypt verify; legacy scrypt hashes are upgraded transparently on success.
+  if (!maybeUpgradePasswordHash(user, data.password))
     return res.status(401).json({ error: 'Invalid username or password' });
 
   // An admin flagged this account for a forced password change — no session
@@ -769,26 +926,23 @@ app.post('/api/login', (req, res) => {
 // POST /api/password/reset  { username, currentPassword, newPassword }
 // Completes a forced password change (users.must_change_password = 1) and
 // returns a fresh session, exactly like /api/login.
-app.post('/api/password/reset', (req, res) => {
-  const { username, currentPassword, newPassword } = req.body || {};
-  if (!username || !currentPassword || !newPassword)
-    return res.status(400).json({ error: 'username, currentPassword and newPassword are required' });
+app.post('/api/password/reset', authLimiter, (req, res) => {
+  const [data,] = validate(PasswordResetSchema, req, res);
+  if (!data) return;
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username).toLowerCase().trim());
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(data.username);
   if (!user || !user.must_change_password)
     return res.status(403).json({ error: 'This account does not need a password reset — sign in normally' });
 
-  if (!verifyPassword(String(currentPassword), user.password_hash))
+  if (!maybeUpgradePasswordHash(user, data.currentPassword))
     return res.status(401).json({ error: 'Current password is incorrect' });
 
-  if (String(newPassword).length < 6)
-    return res.status(400).json({ error: 'New password must be at least 6 characters' });
-  if (verifyPassword(String(newPassword), user.password_hash))
+  if (verifyPassword(data.newPassword, user.password_hash))
     return res.status(400).json({ error: 'New password must be different from the current one' });
 
   db.prepare(
     `UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?`
-  ).run(hashPassword(String(newPassword)), user.id);
+  ).run(hashPassword(data.newPassword), user.id);
   // The forced reset also invalidates any older lingering sessions.
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
 
@@ -820,15 +974,11 @@ app.post('/api/logout', requireAuth, (req, res) => {
 
 // PUT /api/me/notification-settings — update notification preferences
 app.put('/api/me/notification-settings', requireAuth, (req, res) => {
-  const { settings } = req.body || {};
-  const validSettings = ['all', 'mentions_only', 'none'];
-  
-  if (!settings || !validSettings.includes(settings)) {
-    return res.status(400).json({ error: 'Invalid notification settings. Must be "all", "mentions_only", or "none"' });
-  }
-  
-  db.prepare('UPDATE users SET notification_settings = ? WHERE id = ?').run(settings, req.user.id);
-  res.json({ ok: true, notificationSettings: settings });
+  const [data,] = validate(NotificationSettingsSchema, req, res);
+  if (!data) return;
+
+  db.prepare('UPDATE users SET notification_settings = ? WHERE id = ?').run(data.settings, req.user.id);
+  res.json({ ok: true, notificationSettings: data.settings });
 });
 
 // POST /api/verify — grants the ✓ verified badge (admin only; the badge is
@@ -871,11 +1021,9 @@ app.get('/api/me', requireAuth, (req, res) => {
 
 // PUT /api/profile — update profile information (full name)
 app.put('/api/profile', requireAuth, blockIfTimedOut, (req, res) => {
-  const { fullName } = req.body || {};
-  if (!fullName || String(fullName).trim().length === 0) {
-    return res.status(400).json({ error: 'Full name is required' });
-  }
-  db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(String(fullName).trim().slice(0, 80), req.user.id);
+  const [data,] = validate(ProfileSchema, req, res);
+  if (!data) return;
+  db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(data.fullName, req.user.id);
   res.json({ ok: true });
 });
 

@@ -49,6 +49,11 @@ try {
 
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
+// Fail-fast-and-retry instead of "database is locked" when a PM2 graceful
+// reload overlaps the old and new process briefly:
+db.pragma('busy_timeout = 5000');
+// ON DELETE CASCADE clauses below only take effect with FK enforcement on.
+db.pragma('foreign_keys = ON');
 
 // Initialize schema on startup
 async function initDb() {
@@ -215,6 +220,17 @@ async function initDb() {
   `);
 
   // ── migrations for existing databases ────────────────────────────────────
+  // Sessions now carry an explicit expiry (JWT-backed sessions; a janitor
+  // cron prunes rows past this date).
+  const sessCols = db.prepare('PRAGMA table_info(sessions)').all().map(c => c.name);
+  if (!sessCols.includes('expires_at')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN expires_at TEXT`);
+    // Pre-JWT sessions never expired — give existing rows a fresh 30-day window.
+    db.exec(`UPDATE sessions SET expires_at = datetime('now', '+30 days') WHERE expires_at IS NULL`);
+    console.log('Migration: added sessions.expires_at column');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)');
+
   const userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
   if (!userCols.includes('admin')) {
     db.exec('ALTER TABLE users ADD COLUMN admin INTEGER NOT NULL DEFAULT 0');
