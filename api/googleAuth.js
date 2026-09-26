@@ -21,7 +21,7 @@
 //
 // Configuration lives in api/.env — see .env.example.
 
-const { db } = require('./db');
+const { db, ADMIN_USERNAMES } = require('./db');
 const { OAuth2Client } = require('google-auth-library');
 const { createSession, sqlUtcPlus } = require('./auth');
 
@@ -38,7 +38,18 @@ function getClient() {
 const csv = (v) => String(v || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const allowedDomains = () => csv(process.env.GOOGLE_ALLOWED_DOMAINS);
 const allowlist      = () => csv(process.env.GOOGLE_ALLOWLIST);
-const adminEmails    = () => csv(process.env.ADMIN_EMAILS);
+// ADMIN_EMAILS plus the legacy hardcoded usernames: an email whose local part
+// matches one of those usernames (e.g. carterherrault536@gmail.com ↔ 'carterherrault')
+// is treated as an admin identity too, so the owner can never be locked out of
+// the admin role by switching from custom accounts to Google Sign-In.
+const adminNames = () => new Set([...csv(process.env.ADMIN_EMAILS), ...ADMIN_USERNAMES.map(s => s.toLowerCase())]);
+
+function isAdminEmail(email) {
+  const set = adminNames();
+  const e = String(email).toLowerCase();
+  if (set.has(e)) return true;
+  return set.has(e.split('@')[0]);
+}
 
 function isConfigured() {
   return !!process.env.GOOGLE_CLIENT_ID;
@@ -121,8 +132,9 @@ function accessAllowed(email) {
 
 // Full sign-in flow: verify token → gate by domain → find-or-create the user
 // row → return the standard session payload (same shape as /api/login).
-async function loginWithGoogle(credential) {
-  const v = await verifyGoogleCredential(credential);
+// `verify` is injectable for tests; production callers use the real verifier.
+async function loginWithGoogle(credential, verify = verifyGoogleCredential) {
+  const v = await verify(credential);
   if (v.error) return { error: v.error };
   const prof = v.profile;
 
@@ -155,17 +167,23 @@ async function loginWithGoogle(credential) {
   }
 
   if (user) {
+    const shouldBeAdmin = isAdminEmail(prof.email) ? 1 : 0;
     db.prepare(`
       UPDATE users
          SET email = ?, email_verified = ?, picture_url = ?,
+             admin = MAX(admin, ?),
              full_name = CASE WHEN full_name = '' OR full_name IS NULL THEN ? ELSE full_name END
        WHERE id = ?
-    `).run(prof.email, prof.emailVerified ? 1 : 0, prof.picture, prof.name, user.id);
+    `).run(prof.email, prof.emailVerified ? 1 : 0, prof.picture, shouldBeAdmin, prof.name, user.id);
     user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    if (user.admin) {
+      // Keep the role tag in sync (the Admin panel rebuilds tags on save).
+      db.prepare(`INSERT OR IGNORE INTO user_tags (user_id, tag) VALUES (?, 'admin')`).run(user.id);
+    }
   } else {
     const username = suggestUsername(prof.email);
     if (!username) return { error: 'Could not allocate a username for this account. Ask an admin.' };
-    const isAdmin = adminEmails().includes(prof.email) ? 1 : 0;
+    const isAdmin = isAdminEmail(prof.email) ? 1 : 0;
     const info = db.prepare(`
       INSERT INTO users (username, password_hash, full_name, email, email_verified, picture_url, verified, admin)
       VALUES (?, '!', ?, ?, ?, ?, 1, ?)
@@ -202,6 +220,7 @@ function markDeniedReviewed(id) {
 
 module.exports = {
   isConfigured,
+  isAdminEmail,
   migrateGoogle,
   verifyGoogleCredential,
   loginWithGoogle,
