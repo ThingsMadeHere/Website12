@@ -23,6 +23,7 @@ const {
   isConfigured: isGoogleConfigured, loginWithGoogle,
   listDeniedEmails, markDeniedReviewed,
 } = require('./googleAuth');
+const gcal = require('./googleCalendar');
 const {
   attachDb, registerSubscription, removeSubscription, getSubscription, getSubscribedUserIds,
   sendBoardMessageNotification, sendMeetingReminderNotification, sendPushNotification,
@@ -1502,7 +1503,32 @@ function eventRow(row) {
     isMeeting: (row.type || 'meeting') === 'meeting',
     proposedBy: row.proposed_by != null && row.proposed_by !== '' ? Number(row.proposed_by) : null,
     proposerName: row.proposer_name || null,
+    // Google Calendar mirror: set once the event has been written to the
+    // team's Google Calendar; source marks president/admin direct writes.
+    gcalEventId: row.gcal_event_id || null,
+    source: row.source || 'portal',
   };
+}
+
+// Fire-and-forget mirror of an approved portal event into Google Calendar.
+// Never blocks or fails the API call — syncPending() retries any misses.
+function gcalMirror(event, action = 'insert') {
+  if (!gcal.isConfigured()) return Promise.resolve();
+  const run = async () => {
+    try {
+      if (action === 'insert' && !event.gcal_event_id) {
+        const id = await gcal.insertEvent(event);
+        if (id) db.prepare('UPDATE calendar_events SET gcal_event_id = ? WHERE id = ?').run(id, event.id);
+      } else if (action === 'update' && event.gcal_event_id) {
+        await gcal.updateEvent(event, event.gcal_event_id);
+      } else if (action === 'delete' && event.gcal_event_id) {
+        await gcal.deleteEvent(event.gcal_event_id);
+      }
+    } catch (err) {
+      console.error(`[gcal] mirror ${action} failed for event ${event.id}:`, err.message);
+    }
+  };
+  return run();
 }
 
 // Notify everyone subscribed to pushes that an event landed on the calendar.
@@ -1671,7 +1697,7 @@ app.post('/api/events', requireAuth, blockIfTimedOut, (req, res) => {
       .run(String(title).trim(), description || '', date, location || '', evType, status, String(req.user.id));
 
     const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(info.lastInsertRowid);
-    if (status === 'approved') notifyEventApproved(event);
+    if (status === 'approved') { notifyEventApproved(event); gcalMirror(event, 'insert'); }
     res.json(eventRow(event));
   } catch (err) {
     console.error('Error creating event:', err);
@@ -1682,7 +1708,7 @@ app.post('/api/events', requireAuth, blockIfTimedOut, (req, res) => {
 // DELETE /api/events/:id — proposer deletes their own event; admins delete any
 app.delete('/api/events/:id', requireAuth, (req, res) => {
   try {
-    const event = db.prepare('SELECT id, proposed_by FROM calendar_events WHERE id = ?').get(req.params.id);
+    const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     // Numeric compare: better-sqlite3 v12 stores JS numbers bound into this TEXT
@@ -1693,6 +1719,7 @@ app.delete('/api/events/:id', requireAuth, (req, res) => {
       return res.status(403).json({ error: 'You can only delete events you proposed' });
 
     db.prepare('DELETE FROM calendar_events WHERE id = ?').run(req.params.id);
+    if (event.gcal_event_id) gcalMirror(event, 'delete'); // keep Google in sync
     res.json({ success: true });
   } catch (err) {
     console.error('Error deleting event:', err);
@@ -1738,7 +1765,9 @@ app.put('/api/events/:id', requireAuth, blockIfTimedOut, (req, res) => {
     ).run(next.title, next.description, next.date, next.location, next.type, next.status, event.id);
 
     const updated = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(event.id);
-    if (!wasApproved && next.status === 'approved') notifyEventApproved(updated);
+    if (!wasApproved && next.status === 'approved') { notifyEventApproved(updated); gcalMirror(updated, 'insert'); }
+    else if (wasApproved && next.status !== 'approved') gcalMirror(updated, 'delete'); // pulled off the calendar → remove from Google too
+    else if (wasApproved) gcalMirror(updated, 'update');                                // details changed → patch Google
     res.json(eventRow(updated));
   } catch (err) {
     console.error('Error updating event:', err);
@@ -1785,7 +1814,9 @@ app.post('/api/events/:id/vote', requireAuth, blockIfTimedOut, (req, res) => {
     const yes = totals.yes_votes || 0, total = totals.total_votes || 0;
     if (ev && ev.status === 'pending' && total > 0 && yes >= Math.floor(total / 2) + 1) {
       db.prepare(`UPDATE calendar_events SET status = 'approved' WHERE id = ?`).run(req.params.id);
-      notifyEventApproved(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id));
+      const promotedEvent = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id);
+      notifyEventApproved(promotedEvent);
+      gcalMirror(promotedEvent, 'insert');
       promoted = true;
     }
 
@@ -1834,6 +1865,7 @@ app.put('/api/events/:id/approve', requireAuth, (req, res) => {
     if (req.user.admin || (totalVotes > 0 && yesVotes >= majority)) {
       db.prepare(`UPDATE calendar_events SET status = 'approved' WHERE id = ?`).run(req.params.id);
       notifyEventApproved(event);
+      gcalMirror(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id), 'insert');
       res.json({ success: true, approved: true, message: 'Event approved and added to calendar' });
     } else {
       res.status(400).json({
@@ -1864,6 +1896,145 @@ app.put('/api/events/:id/reject', requireAuth, requireAdmin, (req, res) => {
     console.error('Error rejecting event:', err);
     res.status(500).json({ error: 'Failed to reject event' });
   }
+});
+
+// ── Google Calendar (Option A: portal stays source of truth, mirrored to gcal) ─
+// GET /api/gcal/config — is sync set up on this server? (anyone; UI gates on it)
+app.get('/api/gcal/config', (_, res) => {
+  res.json({ configured: gcal.isConfigured() });
+});
+
+// GET /api/gcal/status — admin view: linkage + last errors surfaced via logs.
+app.get('/api/gcal/status', requireAuth, requireAdmin, async (_, res) => {
+  try {
+    const linked = db.prepare(
+      `SELECT COUNT(*) AS n FROM calendar_events WHERE gcal_event_id IS NOT NULL AND gcal_event_id != ''`
+    ).get().n;
+    const pendingSync = db.prepare(
+      `SELECT COUNT(*) AS n FROM calendar_events
+       WHERE status = 'approved' AND (gcal_event_id IS NULL OR gcal_event_id = '')
+         AND date >= datetime('now', '-400 days')`
+    ).get().n;
+    let lastSync = null;
+    if (gcal.isConfigured()) {
+      const list = await gcal.listUpcoming(1);
+      lastSync = list.events ? new Date().toISOString() : (list.error || null);
+    }
+    res.json({ configured: gcal.isConfigured(), linked, pendingSync, reachable: !!lastSync && !String(lastSync).includes('not configured') });
+  } catch (err) {
+    console.error('gcal status failed:', err.message);
+    res.json({ configured: gcal.isConfigured(), error: err.message });
+  }
+});
+
+// POST /api/gcal/direct — the president/admin writes an event DIRECTLY to the
+// team's Google Calendar (no voting), and it also lands on the portal calendar
+// with source='gcal-direct' so members see it everywhere at once.
+app.post('/api/gcal/direct', requireAuth, requireAdmin, blockIfTimedOut, async (req, res) => {
+  if (!gcal.isConfigured())
+    return res.status(503).json({ error: 'Google Calendar sync is not configured on this server (see api/.env.example).' });
+  const { title, date, endDate, location, description } = req.body || {};
+  if (!title || !date) return res.status(400).json({ error: 'Title and date are required' });
+  try {
+    const created = await gcal.createDirect({ title, date, endDate, location, description });
+    if (created.error) return res.status(400).json({ error: created.error });
+    // Mirror into the portal DB as an approved event (source-tagged).
+    const info = db.prepare(
+      `INSERT INTO calendar_events (title, description, date, location, type, status, proposed_by, gcal_event_id, source)
+       VALUES (?, ?, ?, ?, 'event', 'approved', ?, ?, 'gcal-direct')`
+    ).run(String(title).trim(), description || '', date, location || '', String(req.user.id), created.event.id);
+    const event = db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(info.lastInsertRowid);
+    notifyEventApproved(event); // push subscribers that a new event landed
+    res.json({ success: true, event: eventRow(event), google: created.event });
+  } catch (err) {
+    console.error('gcal direct create failed:', err.message);
+    res.status(502).json({ error: `Google Calendar write failed: ${err.message}` });
+  }
+});
+
+// GET /api/gcal/upcoming — preview what's currently on the Google calendar (admin)
+app.get('/api/gcal/upcoming', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const list = await gcal.listUpcoming(req.query.maxResults || 50);
+    if (list.error) return res.status(503).json({ error: list.error });
+    res.json(list);
+  } catch (err) {
+    console.error('gcal upcoming failed:', err.message);
+    res.status(502).json({ error: `Google Calendar read failed: ${err.message}` });
+  }
+});
+
+// POST /api/gcal/import — one-time import of existing Google events into the
+// portal calendar (skips anything already linked or same-titled-and-dated).
+app.post('/api/gcal/import', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const list = await gcal.listUpcoming(250);
+    if (list.error) return res.status(503).json({ error: list.error });
+    let imported = 0;
+    for (const ge of list.events) {
+      if (!ge.start) continue;
+      const exists = db.prepare('SELECT id FROM calendar_events WHERE gcal_event_id = ?').get(ge.id);
+      if (exists) continue;
+      db.prepare(
+        `INSERT INTO calendar_events (title, description, date, location, type, status, proposed_by, gcal_event_id, source)
+         VALUES (?, ?, ?, ?, 'event', 'approved', NULL, ?, 'gcal-import')`
+      ).run(ge.summary || 'Google event', ge.description || '', ge.start, ge.location || '', ge.id);
+      imported++;
+    }
+    res.json({ success: true, imported });
+  } catch (err) {
+    console.error('gcal import failed:', err.message);
+    res.status(502).json({ error: `Google Calendar import failed: ${err.message}` });
+  }
+});
+
+// ── team mailbox (self-hosted Mailcow + the `mailbox` sidecar container) ────
+// Outgoing mail goes through SMTP on port 587 (see api/mailer.js — port 25 is
+// never required from the app; it's only used by MX servers delivering INTO
+// Mailcow, and can be remapped to 2525 if your host blocks it). Incoming mail
+// lands in the team@… mailbox; the `mailbox` container polls it over IMAP and
+// notifies this API here. The hook stores a summary in SQLite so admins can
+// see team mail activity in the portal, pushes a notification, and forwards
+// everything to ADMIN_EMAIL via the normal mailer.
+app.post('/api/mail/inbound-hook', (req, res) => {
+  const secret = (process.env.MAILHOOK_TOKEN || '').trim();
+  if (!secret) return res.status(503).json({ error: 'MAILHOOK_TOKEN not configured' });
+  const token = req.get('x-mailhook-token') || '';
+  if (token.length !== secret.length || !require('crypto').timingSafeEqual(Buffer.from(token.padEnd(secret.length)), Buffer.from(secret))) {
+    return res.status(401).json({ error: 'bad hook token' });
+  }
+  const { from, to, subject, receivedAt, messageId, snippet } = req.body || {};
+  if (!from || !subject) return res.status(400).json({ error: 'from and subject are required' });
+  try {
+    const info = db.prepare(
+      `INSERT INTO inbound_mail (from_addr, to_addr, subject, snippet, message_id, received_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(String(from).slice(0, 254), String(to || '').slice(0, 254), String(subject).slice(0, 500),
+          String(snippet || '').slice(0, 900), String(messageId || '').slice(0, 254),
+          String(receivedAt || new Date().toISOString()).slice(0, 64));
+    console.log(`[mail] inbound #${info.lastInsertRowid}: "${subject}" from ${from}`);
+    sendMail({
+      subject: `[team-mail] ${subject}`,
+      text: `New email for the team mailbox.\n\nFrom: ${from}\nTo: ${to}\nSubject: ${subject}\n\n${snippet || ''}`,
+      html: `<p><b>From:</b> ${String(from)}</p><p><b>To:</b> ${String(to || '')}</p>` +
+            `<p><b>Subject:</b> ${String(subject)}</p><pre style="white-space:pre-wrap">${String(snippet || '')}</pre>` +
+            `<p style="color:#888">Delivered by the MCHS Robotics team mailbox.</p>`,
+    }).catch(() => {});
+    res.json({ success: true, id: info.lastInsertRowid });
+  } catch (err) {
+    console.error('[mail] inbound hook failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/mail/inbox?limit=50 (admin) — recent team-mail summaries
+app.get('/api/mail/inbox', requireAuth, requireAdmin, (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+  res.json(db.prepare(
+    `SELECT id, from_addr AS fromAddr, to_addr AS toAddr, subject, snippet,
+            received_at AS receivedAt
+     FROM inbound_mail ORDER BY id DESC LIMIT ?`
+  ).all(limit));
 });
 
 // ── admin: member management ─────────────────────────────────────────────────
@@ -2211,6 +2382,16 @@ initDb().then(() => {
     catch (err) { console.error('Recurring meeting seeding failed:', err); }
   }, 6 * 60 * 60 * 1000);
   reseed.unref?.();
+
+  // Google Calendar: retry any approved events that missed their mirror write
+  // (server restarted mid-push, transient API errors, pre-sync backlog).
+  if (gcal.isConfigured()) {
+    gcal.syncPending(db).catch(() => {});
+    const gcalSync = setInterval(() => {
+      gcal.syncPending(db).catch(err => console.error('[gcal] background sync failed:', err.message));
+    }, 15 * 60 * 1000);
+    gcalSync.unref?.();
+  }
   
   // Start meeting reminder scheduler
   scheduleMeetingReminders();

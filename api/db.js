@@ -296,6 +296,12 @@ async function initDb() {
     ['location',    'TEXT'],
     ['type',        `TEXT DEFAULT 'meeting'`],
     ['description', 'TEXT'],
+    // Google Calendar sync (api/googleCalendar.js): gcal_event_id links a
+    // portal event to its mirrored Google event; source marks events that
+    // were written DIRECTLY to Google by an admin/president and imported
+    // into the portal ('gcal-direct') instead of proposed in-app.
+    ['gcal_event_id', 'TEXT'],
+    ['source',        `TEXT NOT NULL DEFAULT 'portal'`],
   ];
   for (const [col, decl] of evMigrations) {
     if (!evCols.includes(col)) {
@@ -339,6 +345,22 @@ async function initDb() {
     used_at     TEXT,
     expires_at  TEXT        NOT NULL,
     created_at  TEXT        NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  // Team mailbox activity log (self-hosted Mailcow + `mailbox` sidecar).
+  // The sidecar polls the inbound IMAP folder and POSTs summaries to
+  // /api/mail/inbound-hook; bodies stay in Mailcow's own Dovecot storage —
+  // this table only holds what the portal needs to display/notify.
+  db.exec(`CREATE TABLE IF NOT EXISTS inbound_mail (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_addr   TEXT    NOT NULL,
+    to_addr     TEXT,
+    subject     TEXT    NOT NULL,
+    snippet     TEXT,
+    message_id  TEXT,
+    received_at TEXT    NOT NULL,
+    seen        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
   )`);
 
   // ── empty-database warning ───────────────────────────────────────────────
