@@ -12,6 +12,13 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
   // Admins can skip the vote and push straight onto the calendar; members'
   // events always go through voting.
   const [pushMode, setPushMode] = useState(isAdmin);
+  // President/admin extra: write straight to the team's Google Calendar
+  // (only offered when /api/gcal/config says sync is set up on this server).
+  const [gcalConfigured, setGcalConfigured] = useState(false);
+  const [gcalDirectMode, setGcalDirectMode] = useState(false);
+  useEffect(() => {
+    fetch('/api/gcal/config').then(r => r.ok ? r.json() : {}).then(d => setGcalConfigured(!!d.configured)).catch(() => {});
+  }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
@@ -49,7 +56,10 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
     setIsSubmitting(true);
     
     try {
-      const response = await fetch('/api/events', {
+      // President/admin "write directly to Google" path — hits the Google
+      // Calendar API first, then lands on the portal calendar as approved.
+      const useGcalDirect = isAdmin && gcalConfigured && gcalDirectMode;
+      const response = await fetch(useGcalDirect ? '/api/gcal/direct' : '/api/events', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -60,8 +70,7 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
           date: `${date}T${time}:00`,
           location: location || 'TBD',
           description,
-          type,
-          push: isAdmin && pushMode, // admins can skip voting entirely
+          ...(useGcalDirect ? {} : { type, push: isAdmin && pushMode }), // admins can skip voting entirely
         })
       });
       
@@ -82,7 +91,7 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
     }
   };
 
-  const pushed = isAdmin && pushMode;
+  const pushed = isAdmin && (pushMode || gcalDirectMode);
 
   if (showSuccess) {
     return (
@@ -285,27 +294,54 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
 
             {/* Admin: publish immediately, or send to voting */}
             {isAdmin && (
-              <div className="p-3 rounded-lg" style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}>
-                <label className="flex items-start gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={pushMode}
-                    onChange={e => setPushMode(e.target.checked)}
-                    disabled={isSubmitting}
-                    className="mt-0.5 w-4 h-4 shrink-0"
-                    style={{ accentColor: '#16a34a' }}
-                  />
-                  <span>
-                    <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                      <Zap className="w-3.5 h-3.5" style={{ color: '#a16207' }} />
-                      Publish directly — skip voting
+              <div className="space-y-2">
+                <div className="p-3 rounded-lg" style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}>
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pushMode}
+                      onChange={e => setPushMode(e.target.checked)}
+                      disabled={isSubmitting || gcalDirectMode}
+                      className="mt-0.5 w-4 h-4 shrink-0"
+                      style={{ accentColor: '#16a34a' }}
+                    />
+                    <span>
+                      <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                        <Zap className="w-3.5 h-3.5" style={{ color: '#a16207' }} />
+                        Publish directly — skip voting
+                      </span>
+                      <span className="block text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        As an admin you can put this event straight on the calendar. Uncheck to let the
+                        team vote on it first instead.
+                      </span>
                     </span>
-                    <span className="block text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      As an admin you can put this event straight on the calendar. Uncheck to let the
-                      team vote on it first instead.
-                    </span>
-                  </span>
-                </label>
+                  </label>
+                </div>
+                {gcalConfigured && (
+                  <div className="p-3 rounded-lg" style={{ background: 'rgba(26,115,232,0.05)', border: '1px solid rgba(26,115,232,0.3)' }}>
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={gcalDirectMode}
+                        onChange={e => setGcalDirectMode(e.target.checked)}
+                        disabled={isSubmitting}
+                        className="mt-0.5 w-4 h-4 shrink-0"
+                        style={{ accentColor: '#1a73e8' }}
+                      />
+                      <span>
+                        <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                          <CalendarIcon className="w-3.5 h-3.5" style={{ color: '#1a73e8' }} />
+                          Also write directly to the team's Google Calendar
+                        </span>
+                        <span className="block text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                          President option: creates the event on Google Calendar via the API first, then adds
+                          it to this portal calendar immediately (no voting). Members with the team calendar
+                          subscribed see it instantly.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                )}
               </div>
             )}
 
@@ -321,12 +357,16 @@ export default function EventDialog({ session, onClose, onEventCreated }) {
                 <Send className="w-4 h-4" />
                 {isSubmitting
                   ? 'Submitting...'
-                  : pushed
-                    ? 'Add to Calendar Now'
-                    : 'Submit Event for Voting'}
+                  : gcalDirectMode && isAdmin
+                    ? 'Write to Google Calendar'
+                    : pushed
+                      ? 'Add to Calendar Now'
+                      : 'Submit Event for Voting'}
               </button>
               <p className="mt-3 text-xs text-center" style={{ color: 'var(--text-subtle)' }}>
-                {pushed
+                {isAdmin && gcalDirectMode
+                  ? 'This event is created on the team’s Google Calendar and appears here immediately — members get a push notification.'
+                  : pushed
                   ? 'This event will appear on the calendar immediately and members get a push notification.'
                   : 'Submitted events will be posted for voting. Events with majority approval are added to the calendar.'}
               </p>

@@ -1,0 +1,13 @@
+{
+  "name": "mchs-mailbox-sidecar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Polls the team's Mailcow mailbox over IMAP and reports new inbound mail to the portal API.",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "imapflow": "^1.0.171",
+    "mailparser": "^3.7.1"
+  }
+}
