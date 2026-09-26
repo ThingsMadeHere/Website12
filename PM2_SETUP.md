@@ -128,6 +128,28 @@ cd api && npm rebuild better-sqlite3 && cd ..
 pm2 start ecosystem.config.cjs && pm2 save
 ```
 
+**If `npm rebuild` fails with a "code must be one of..." error:** your Node is
+too new for the pinned better-sqlite3 prebuild system. The lockfile pins
+**better-sqlite3 12.4.1**, whose official prebuilds cover Node's LTS even
+releases (module versions 108–137: Node 20 / 22 / 24). Node 25+ and odd-numbered
+Node releases (e.g. v26) have **no prebuilds** — npm's failure to pick one is
+the giveaway. Either switch to an LTS (`nvm install 24 && nvm alias default 24`,
+then reinstall PM2 under it), or compile from source:
+
+```bash
+cd api && npm rebuild better-sqlite3 --build-from-source
+# requires: python3, make, g++ (apt install build-essential python3)
+```
+
+Check which runtime PM2 actually uses — a PM2 daemon spawned by an old Node
+keeps running it forever until `pm2 kill`:
+
+```bash
+node -v                                  # shell's node
+head -1 $(which pm2)                     # shebang = daemon's node
+pm2 pid mchs-api | xargs readlink /proc/{}/exe   # process's actual binary
+```
+
 ### `EADDRINUSE: address already in use :::3001` — a Docker container owns the port
 
 This repo also ships a Docker Compose stack whose API service is literally
@@ -149,10 +171,29 @@ proxy at 3002.
 
 ### `[PM2][ERROR] Process with pid NNNN already exists` / `Cannot read properties of undefined (reading 'pm2_env')`
 
-Stale PM2 daemon state after repeated crash-loops. Reset it:
+Stale/corrupt PM2 daemon state after repeated crash-loops. The dump file in
+`~/.pm2` still references PIDs that no longer exist, so `pm2 start` refuses to
+adopt them and `pm2 save` crashes inside `speedList()` when it hits a ghost
+entry without `pm2_env`. One-command fix:
 
 ```bash
-pm2 kill        # kills the daemon (does NOT touch Docker containers)
+scripts/pm2-reset.sh            # pm2 kill + wipe ~/.pm2 + fresh start + pm2 save
+scripts/pm2-reset.sh --kill-orphans   # also kill stray `node index.js` runs holding :3001
+```
+
+Manual equivalent if you prefer:
+
+```bash
+pm2 kill                        # kills the daemon (does NOT touch Docker containers)
+rm -rf ~/.pm2                   # removes the corrupt dump.pm2 state
 pm2 start ecosystem.config.cjs
 pm2 save
+```
+
+If the API port 3001 was held by an orphaned process (started by hand, not via
+PM2), check first — otherwise the new process crash-loops with `EADDRINUSE`:
+
+```bash
+pgrep -af "node.*index.js"      # anything here survived `pm2 kill` → pkill it
+lsof -i :3001
 ```
