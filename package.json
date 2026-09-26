@@ -10,7 +10,11 @@
     "dev:all": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "scripts/pm2-deploy.sh",
+    "deploy:pull": "scripts/pm2-deploy.sh --pull",
+    "test:pm2": "scripts/pm2-test.sh",
+    "healthcheck": "scripts/healthcheck.sh"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",

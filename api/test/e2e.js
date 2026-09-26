@@ -44,8 +44,8 @@ async function main() {
   ok('list users', r.status === 200 && Array.isArray(r.data) && r.data.some(u => u.username === 'testadmin'));
 
   console.log('── 3. application → approval copies name+photo ──');
-  r = await j('POST', '/api/applications', { username: 'alice', password: 'wonderland1', fullName: 'Alice Applicant', photo: fakePhoto });
-  ok('application submitted', r.status === 200 && r.data.status === 'pending', JSON.stringify(r.data));
+  r = await j('POST', '/api/applications', { username: 'alice', fullName: 'Alice Applicant', photo: fakePhoto });
+  ok('application submitted', (r.status === 200 || r.status === 201) && r.data.status === 'pending', JSON.stringify(r.data));
   const appId = r.data.applicationId;
   r = await j('POST', `/api/applications/${appId}/decision`, { action: 'approve' }, adminTok);
   ok('approve application', r.status === 200 && r.data.status === 'approved');
@@ -158,7 +158,7 @@ async function main() {
   ok('new password → forced reset prompt, no token', r.status === 200 && r.data.mustChangePassword === true && !r.data.token, JSON.stringify(r.data));
 
   console.log('── 10. pending application auto-denied when admin creates same username ──');
-  r = await j('POST', '/api/applications', { username: 'carol', password: 'carolpass1', fullName: 'Carol C', photo: fakePhoto });
+  r = await j('POST', '/api/applications', { username: "carol", fullName: "Carol C", photo: fakePhoto });
   ok('carol applied', r.status === 200);
   const carolAppId = r.data.applicationId;
   r = await j('POST', '/api/admin/users', { username: 'carol', password: 'caroltemp1' }, adminTok);
@@ -174,6 +174,40 @@ async function main() {
   console.log('── 12. bad session ──');
   r = await j('GET', '/api/me', null, 'bogus-token');
   ok('/api/me with bad token (401)', r.status === 401);
+
+  console.log('── 13. team-key self-service sign-in (no admin per login) ──');
+  // Seeded by test/seed-admin.js when TEAM_KEY is set (scripts/pm2-test.sh does this).
+  const TESTKEY = process.env.TEST_TEAM_KEY || 'ROBO-KEY-TEST';
+  let keyActive = false;
+  r = await j('POST', '/api/admin/join-key', { key: TESTKEY, label: 'e2e' }, adminTok);
+  if (r.status === 200) {
+    keyActive = true;
+    ok('admin can set/rotate the team key', r.data.ok === true && !!r.data.expiresAt);
+  } else {
+    // key already seeded via TEAM_KEY env — rotation would change it, so skip writes
+    console.log(`  NOTE  join-key endpoint returned ${r.status} — using pre-seeded key`);
+    const probe = await j('POST', '/api/login/join', { username: 'zzprobe', key: TESTKEY });
+    keyActive = probe.status === 200;
+  }
+  if (!keyActive) {
+    console.log('  SKIP  team key not active — run via scripts/pm2-test.sh to cover join flow');
+  } else {
+    r = await j('POST', '/api/login/join', { username: 'dave', key: TESTKEY });
+    ok('join with correct key creates account + session', r.status === 200 && !!r.data.token, JSON.stringify(r.data));
+    r = await j('POST', '/api/login/join', { username: 'dave', key: TESTKEY });
+    ok('same key signs the account back in', r.status === 200 && !!r.data.token);
+    r = await j('POST', '/api/login/join', { username: 'erin', key: 'WRONG-KEY-999' });
+    ok('wrong key for new username → application path', r.status === 403 && r.data.code === 'apply', JSON.stringify(r.data));
+    r = await j('POST', '/api/login/join', { username: 'dave', key: 'WRONG-KEY-999' });
+    ok('wrong key on existing account rejected (401)', r.status === 401, JSON.stringify(r.data));
+    r = await j('POST', '/api/login/join', { username: 'ab', key: TESTKEY });
+    ok('invalid username rejected', r.status === 401 || r.status === 403, JSON.stringify(r.data));
+    const daveLogin = await j('POST', '/api/login/join', { username: 'dave', key: TESTKEY });
+    r = await j('GET', '/api/admin/users', null, daveLogin.data.token);
+    ok('key-joined user has no admin access (403)', r.status === 403);
+    r = await j('POST', '/api/login', { username: 'dave', password: 'anything' });
+    ok('join-key accounts have no usable password (401)', r.status === 401);
+  }
 
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
