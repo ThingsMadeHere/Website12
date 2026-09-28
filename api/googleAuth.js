@@ -106,10 +106,34 @@ async function verifyGoogleCredential(credential) {
   let ticket;
   try {
     ticket = await client.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
-  } catch {
-    return { error: 'That Google sign-in token could not be verified. Please try again.' };
+  } catch (err) {
+    // Always surface the real reason — silent failures here were impossible to debug.
+    console.error('[googleAuth] verifyIdToken FAILED:', err && err.message ? err.message : err);
+    if (process.env.GOOGLE_AUTH_DEBUG === '1') {
+      try {
+        const parts = credential.split('.');
+        const header  = parts.length === 3 ? JSON.parse(Buffer.from(parts[0], 'base64url').toString()) : null;
+        const payload = parts.length === 3 ? JSON.parse(Buffer.from(parts[1], 'base64url').toString()) : null;
+        console.error('[googleAuth] token header:', JSON.stringify(header));
+        if (payload) {
+          const now = Math.floor(Date.now() / 1000);
+          console.error('[googleAuth] token payload:', JSON.stringify({
+            iss: payload.iss, aud: payload.aud, sub: payload.sub,
+            email: payload.email, exp: payload.exp, iat: payload.iat, now,
+            expired: payload.exp ? payload.exp < now : null,
+            audience_mismatch: payload.aud !== process.env.GOOGLE_CLIENT_ID,
+          }));
+        }
+      } catch (e) {
+        console.error('[googleAuth] could not decode raw token:', e.message);
+      }
+    }
+    return { error: `That Google sign-in token could not be verified (${err && err.message ? err.message : 'unknown error'}).` };
   }
   const p = ticket.getPayload() || {};
+  if (process.env.GOOGLE_AUTH_DEBUG === '1') {
+    console.log('[googleAuth] verified OK for', p.email, '(sub', p.sub, ')');
+  }
   if (!p.email) return { error: 'Your Google account did not share an email address.' };
   return {
     profile: {
