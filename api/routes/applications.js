@@ -12,7 +12,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { db, ADMIN_USERNAMES } = require('../db');
 const { sendMail } = require('../mailer');
-const { requireAuth, requireAdmin } = require('../auth');
+const { requireAuth, requireAdmin, hashPassword } = require('../auth');
 const { authLimiter } = require('../modules/limits');
 const { validate, ApplicationSchema, DecisionSchema } = require('../modules/schemas');
 const { baseUrl, esc } = require('../modules/util');
@@ -114,12 +114,15 @@ router.post('/', authLimiter, (req, res) => {
     return res.status(409).json({ error: 'An application for this username is already pending review' });
 
   const token = crypto.randomBytes(32).toString('hex');
+  // Empty string = no usable password (login rejects it); a supplied one is
+  // bcrypt-hashed up front so the raw value never touches the database.
+  const passwordHash = data.password ? hashPassword(data.password) : '';
   const info = db
     .prepare(
       `INSERT INTO applications (username, full_name, password_hash, photo_mime, photo, token)
-       VALUES (?, ?, '', ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(cleaned, name, mime, buf, token);
+    .run(cleaned, name, passwordHash, mime, buf, token);
 
   const id         = info.lastInsertRowid;
   const base       = baseUrl(req);

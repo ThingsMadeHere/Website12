@@ -44,7 +44,10 @@ async function main() {
   ok('list users', r.status === 200 && Array.isArray(r.data) && r.data.some(u => u.username === 'testadmin'));
 
   console.log('── 3. application → approval copies name+photo ──');
-  r = await j('POST', '/api/applications', { username: 'alice', fullName: 'Alice Applicant', photo: fakePhoto });
+  // password is optional for real sign-up flows (Google-first), but the
+  // approved account must be able to use the legacy bcrypt login — so the
+  // suite supplies one and signs in with it below.
+  r = await j('POST', '/api/applications', { username: 'alice', fullName: 'Alice Applicant', password: 'wonderland1', photo: fakePhoto });
   ok('application submitted', (r.status === 200 || r.status === 201) && r.data.status === 'pending', JSON.stringify(r.data));
   const appId = r.data.applicationId;
   r = await j('POST', `/api/applications/${appId}/decision`, { action: 'approve' }, adminTok);

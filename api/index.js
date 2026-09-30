@@ -14,8 +14,26 @@
 // applications' approveApplication(), which is an explicitly shared export).
 //
 // Load api/.env (RESEND_API_KEY, SMTP_*, ADMIN_EMAIL, PUBLIC_URL, …) before
-// anything reads process.env. The file is git-ignored — see README.
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+// anything reads process.env. The file is git-ignored — copy .env.example to
+// create it. Missing .env is fine locally: every variable below has a safe
+// default or degrades gracefully; only real email/push/Google features go dark.
+const dotenv = require('dotenv');
+const envPath = require('path').join(__dirname, '.env');
+try {
+  if (!require('fs').existsSync(envPath)) {
+    console.warn(
+      `[env] ${envPath} not found — copying .env.example to get started:\n` +
+      `      cp ${require('path').relative(process.cwd(), require('path').join(__dirname, '.env.example'))} ${require('path').relative(process.cwd(), envPath)}`
+    );
+  }
+} catch { /* warn-only, never fatal */ }
+dotenv.config({ path: envPath });
+
+// JWT_SECRET fallback: random per-process secret keeps local dev working but
+// silently invalidates all sessions on every restart — very confusing. Loud warning.
+if (!process.env.JWT_SECRET) {
+  console.warn('[env] JWT_SECRET is unset — sessions will be invalidated on every restart. Set it in api/.env for anything beyond throwaway local testing.');
+}
 
 const express = require('express');
 const cors = require('cors');
