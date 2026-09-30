@@ -13,7 +13,7 @@ const { db } = require('../db');
 const {
   hashPassword, verifyPassword, maybeUpgradePasswordHash,
   createSession, destroySession, requireAuth, requireAdmin,
-  getJoinKeyInfo, setJoinKey, clearJoinKey, joinWithKey, SESSION_TTL_DAYS,
+  getJoinKeyInfo, setJoinKey, clearJoinKey, joinWithKey, SESSION_TTL_DAYS, KEY_TTL_DAYS,
 } = require('../auth');
 const {
   isConfigured: isGoogleConfigured, loginWithGoogle,
@@ -67,7 +67,10 @@ function sessionPayload(user) {
 //   POST /api/password/reset                       — forced password change
 
 // GET /api/auth/config — what the sign-in screen needs to know (public).
-router.get('/config', (_, res) => {
+// Paths in this router are written as the FULL legacy URL ('/auth/...',
+// '/login', '/me', …) because index.js mounts it at both '/api' and
+// '/api/auth' so every original monolith URL keeps resolving unchanged.
+router.get('/auth/config', (_, res) => {
   const configured = isGoogleConfigured();
   res.json({
     googleEnabled: configured,
@@ -81,7 +84,7 @@ router.get('/config', (_, res) => {
 // On success responds with the standard session payload AND sets an HttpOnly
 // cookie (mchs_gsid=<email>) so a returning user can complete sign-in with one
 // click — no popup, no interaction, safe for kiosk-style Chromebooks.
-router.post('/google', authLimiter, async (req, res) => {
+router.post('/auth/google', authLimiter, async (req, res) => {
   if (!isGoogleConfigured())
     return res.status(503).json({ error: 'Google Sign-In is not configured on this server yet.' });
 
@@ -107,7 +110,7 @@ router.post('/google', authLimiter, async (req, res) => {
 // with Google before: the browser still has our HttpOnly cookie, so we mint a
 // fresh session without touching Google at all. Rate-limited + requires the
 // cookie to match an existing verified account.
-router.post('/google/quick', authLimiter, (req, res) => {
+router.post('/auth/google/quick', authLimiter, (req, res) => {
   const email = String(req.cookies?.[GOOGLE_COOKIE] || '').toLowerCase().trim();
   if (!email) return res.status(401).json({ error: 'Not signed in' });
 
@@ -121,7 +124,7 @@ router.post('/google/quick', authLimiter, (req, res) => {
 
 // GET /api/auth/google/status — does this browser carry the quick-sign-in
 // cookie? Lets the landing page show a one-click "Continue as …" button.
-router.get('/google/status', (req, res) => {
+router.get('/auth/google/status', (req, res) => {
   const email = String(req.cookies?.[GOOGLE_COOKIE] || '').toLowerCase().trim();
   if (!email) return res.json({ remembered: false });
   const user = db.prepare('SELECT username, full_name, verified FROM users WHERE email = ?').get(email);
@@ -138,12 +141,12 @@ router.get('/google/status', (req, res) => {
 // via GOOGLE_ALLOWLIST + re-check).
 
 // GET /api/admin/google-denied — recent blocked sign-in attempts (admin)
-router.get('/google-denied', requireAuth, requireAdmin, (_, res) => {
+router.get('/admin/google-denied', requireAuth, requireAdmin, (_, res) => {
   res.json({ requests: listDeniedEmails() });
 });
 
 // POST /api/admin/google-denied/:id/review — mark an attempt as handled
-router.post('/google-denied/:id/review', requireAuth, requireAdmin, (req, res) => {
+router.post('/admin/google-denied/:id/review', requireAuth, requireAdmin, (req, res) => {
   markDeniedReviewed(req.params.id);
   res.json({ ok: true });
 });
@@ -151,7 +154,7 @@ router.post('/google-denied/:id/review', requireAuth, requireAdmin, (req, res) =
 // ── team key (LEGACY admin-managed) ──────────────────────────────────────────
 
 // GET /api/admin/join-key — status only; the key itself is stored hashed
-router.get('/join-key', requireAuth, requireAdmin, (_, res) => {
+router.get('/admin/join-key', requireAuth, requireAdmin, (_, res) => {
   const info = getJoinKeyInfo();
   if (!info) return res.json({ set: false });
   res.json({
@@ -165,10 +168,10 @@ router.get('/join-key', requireAuth, requireAdmin, (_, res) => {
 
 // POST /api/admin/join-key  { key, label?, days? } — set or rotate the key.
 // Existing sessions stay valid; only NEW sign-ins need the new key.
-router.post('/join-key', requireAuth, requireAdmin, (req, res) => {
+router.post('/admin/join-key', requireAuth, requireAdmin, (req, res) => {
   const [body,] = validate(JoinKeySetSchema, req, res);
   if (!body) return;
-  const ttl = body.days || KEY_TTL_DAYS_LOCAL;
+  const ttl = body.days || KEY_TTL_DAYS;
   const r = setJoinKey(body.key, req.user.id, body.label, ttl);
   if (r.error) return res.status(400).json({ error: r.error });
   console.log(`Team key rotated by ${req.user.username} (label "${r.label}", valid ${ttl}d)`);
@@ -176,7 +179,7 @@ router.post('/join-key', requireAuth, requireAdmin, (req, res) => {
 });
 
 // DELETE /api/admin/join-key — close self-service sign-in (applications still work)
-router.delete('/join-key', requireAuth, requireAdmin, (req, res) => {
+router.delete('/admin/join-key', requireAuth, requireAdmin, (req, res) => {
   clearJoinKey();
   console.log(`Team key removed by ${req.user.username}`);
   res.json({ ok: true });
@@ -184,12 +187,12 @@ router.delete('/join-key', requireAuth, requireAdmin, (req, res) => {
 
 // KEY_TTL_DAYS lives in auth.js; import lazily via require to avoid listing it
 // twice (kept as a constant here mirrors the original index.js behavior).
-const { KEY_TTL_DAYS: KEY_TTL_DAYS_LOCAL } = require('../auth');
+// (KEY_TTL_DAYS is imported at the top of this file from ../auth)
 
 // Legacy fallback: POST /login/join  { username, key } — the old shared
 // "team key" sign-in. Superseded by Google Sign-In; kept only so recovery/
 // automation scripts and old databases keep working. Not offered in the UI.
-router.post('/join', authLimiter, (req, res) => {
+router.post('/login/join', authLimiter, (req, res) => {
   const [data,] = validate(JoinLoginSchema, req, res);
   if (!data) return;
   const result = joinWithKey(data.username, data.key);
@@ -239,7 +242,7 @@ router.post('/join', authLimiter, (req, res) => {
 // POST /login  { username, password } — legacy bcrypt sign-in kept for
 // recovery/automation accounts (and the E2E test suite). Regular members use
 // Google Sign-In above.
-router.post('/', authLimiter, (req, res) => {
+router.post('/login', authLimiter, (req, res) => {
   const [data,] = validate(LoginSchema, req, res);
   if (!data) return;
 
