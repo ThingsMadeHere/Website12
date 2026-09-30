@@ -26,8 +26,10 @@ const LoginSchema = z.object({
 });
 
 const JoinLoginSchema = z.object({
-  username: z.string().trim().toLowerCase().min(3).max(20)
-    .regex(/^[a-z0-9_]+$/, 'Usernames: 3–20 letters, numbers, or underscores.'),
+  // Loose on purpose: username-shape errors must flow through joinWithKey()
+  // and the route's 'apply' branch (401/403 + code:'apply') so clients get a
+  // single consistent error contract — never a schema-level 400 here.
+  username: z.string().trim().toLowerCase().min(1, 'Enter a username.').max(64),
   key: z.string().min(1, 'Enter the team key.').max(100),
 });
 
@@ -45,6 +47,11 @@ const PhotoSchema = z.object({
 const ApplicationSchema = z.object({
   username: UsernameSchema,
   fullName: z.string().trim().min(1, 'Full name is required').max(80),
+  // Optional initial password. When present it is bcrypt-hashed before
+  // storage and becomes the account's sign-in password on approval; when
+  // absent the approved account has no usable password (Google Sign-In /
+  // admin-created accounts are the primary flows).
+  password: z.string().min(6, 'Password must be at least 6 characters').max(200).optional(),
   photo: PhotoSchema.optional(),
 });
 
