@@ -1,0 +1,135 @@
+2026-09-25T19:58:39: Error: The module '/root/Jarvis/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+2026-09-25T19:58:39: was compiled against a different Node.js version using
+2026-09-25T19:58:39: NODE_MODULE_VERSION 115. This version of Node.js requires
+2026-09-25T19:58:39: NODE_MODULE_VERSION 147. Please try re-compiling or re-installing
+2026-09-25T19:58:39: the module (for instance, using `npm rebuild` or `npm install`).
+2026-09-25T19:58:39:     at Object..node (node:internal/modules/cjs/loader:2101:18)
+2026-09-25T19:58:39:     at Module.load (node:internal/modules/cjs/loader:1656:32)
+2026-09-25T19:58:39:     at Module._load (node:internal/modules/cjs/loader:1448:12)
+2026-09-25T19:58:39:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-09-25T19:58:39:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-09-25T19:58:39:     at require (node:internal/modules/helpers:196:16)
+2026-09-25T19:58:39:     at bindings (/root/Jarvis/api/node_modules/bindings/bindings.js:112:48)
+2026-09-25T19:58:39:     at new Database (/root/Jarvis/api/node_modules/better-sqlite3/lib/database.js:48:64)
+2026-09-25T19:58:39:     at Object.<anonymous> (/root/Jarvis/api/db.js:50:12)
+2026-09-25T19:58:39:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-09-25T19:58:39:   code: 'ERR_DLOPEN_FAILED'
+2026-09-25T19:58:39: }
+2026-09-25T19:58:46: Error: The module '/root/Jarvis/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+2026-09-25T19:58:46: was compiled against a different Node.js version using
+2026-09-25T19:58:46: NODE_MODULE_VERSION 115. This version of Node.js requires
+2026-09-25T19:58:46: NODE_MODULE_VERSION 147. Please try re-compiling or re-installing
+2026-09-25T19:58:46: the module (for instance, using `npm rebuild` or `npm install`).
+2026-09-25T19:58:46:     at Object..node (node:internal/modules/cjs/loader:2101:18)
+2026-09-25T19:58:46:     at Module.load (node:internal/modules/cjs/loader:1656:32)
+2026-09-25T19:58:46:     at Module._load (node:internal/modules/cjs/loader:1448:12)
+2026-09-25T19:58:46:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-09-25T19:58:46:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-09-25T19:58:46:     at require (node:internal/modules/helpers:196:16)
+2026-09-25T19:58:46:     at bindings (/root/Jarvis/api/node_modules/bindings/bindings.js:112:48)
+2026-09-25T19:58:46:     at new Database (/root/Jarvis/api/node_modules/better-sqlite3/lib/database.js:48:64)
+2026-09-25T19:58:46:     at Object.<anonymous> (/root/Jarvis/api/db.js:50:12)
+2026-09-25T19:58:46:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-09-25T19:58:46:   code: 'ERR_DLOPEN_FAILED'
+2026-09-25T19:58:46: }
+2026-09-25T19:59:51: Error: The module '/root/Jarvis/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+2026-09-25T19:59:51: was compiled against a different Node.js version using
+2026-09-25T19:59:51: NODE_MODULE_VERSION 115. This version of Node.js requires
+2026-09-25T19:59:51: NODE_MODULE_VERSION 147. Please try re-compiling or re-installing
+2026-09-25T19:59:51: the module (for instance, using `npm rebuild` or `npm install`).
+2026-09-25T19:59:51:     at Object..node (node:internal/modules/cjs/loader:2101:18)
+2026-09-25T19:59:51:     at Module.load (node:internal/modules/cjs/loader:1656:32)
+2026-09-25T19:59:51:     at Module._load (node:internal/modules/cjs/loader:1448:12)
+2026-09-25T19:59:51:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-09-25T19:59:51:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-09-25T19:59:51:     at require (node:internal/modules/helpers:196:16)
+2026-09-25T19:59:51:     at bindings (/root/Jarvis/api/node_modules/bindings/bindings.js:112:48)
+2026-09-25T19:59:51:     at new Database (/root/Jarvis/api/node_modules/better-sqlite3/lib/database.js:48:64)
+2026-09-25T19:59:51:     at Object.<anonymous> (/root/Jarvis/api/db.js:50:12)
+2026-09-25T19:59:51:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-09-25T19:59:51:   code: 'ERR_DLOPEN_FAILED'
+2026-09-25T19:59:51: }
+2026-09-25T20:00:05: Error: The module '/root/Jarvis/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+2026-09-25T20:00:05: was compiled against a different Node.js version using
+2026-09-25T20:00:05: NODE_MODULE_VERSION 115. This version of Node.js requires
+2026-09-25T20:00:05: NODE_MODULE_VERSION 147. Please try re-compiling or re-installing
+2026-09-25T20:00:05: the module (for instance, using `npm rebuild` or `npm install`).
+2026-09-25T20:00:05:     at Object..node (node:internal/modules/cjs/loader:2101:18)
+2026-09-25T20:00:05:     at Module.load (node:internal/modules/cjs/loader:1656:32)
+2026-09-25T20:00:05:     at Module._load (node:internal/modules/cjs/loader:1448:12)
+2026-09-25T20:00:05:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-09-25T20:00:05:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-09-25T20:00:05:     at require (node:internal/modules/helpers:196:16)
+2026-09-25T20:00:05:     at bindings (/root/Jarvis/api/node_modules/bindings/bindings.js:112:48)
+2026-09-25T20:00:05:     at new Database (/root/Jarvis/api/node_modules/better-sqlite3/lib/database.js:48:64)
+2026-09-25T20:00:05:     at Object.<anonymous> (/root/Jarvis/api/db.js:50:12)
+2026-09-25T20:00:05:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-09-25T20:00:05:   code: 'ERR_DLOPEN_FAILED'
+2026-09-25T20:00:05: }
+2026-09-25T20:05:57: Error: The module '/root/Jarvis/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+2026-09-25T20:05:57: was compiled against a different Node.js version using
+2026-09-25T20:05:57: NODE_MODULE_VERSION 115. This version of Node.js requires
+2026-09-25T20:05:57: NODE_MODULE_VERSION 147. Please try re-compiling or re-installing
+2026-09-25T20:05:57: the module (for instance, using `npm rebuild` or `npm install`).
+2026-09-25T20:05:57:     at Object..node (node:internal/modules/cjs/loader:2101:18)
+2026-09-25T20:05:57:     at Module.load (node:internal/modules/cjs/loader:1656:32)
+2026-09-25T20:05:57:     at Module._load (node:internal/modules/cjs/loader:1448:12)
+2026-09-25T20:05:57:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-09-25T20:05:57:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-09-25T20:05:57:     at require (node:internal/modules/helpers:196:16)
+2026-09-25T20:05:57:     at bindings (/root/Jarvis/api/node_modules/bindings/bindings.js:112:48)
+2026-09-25T20:05:57:     at new Database (/root/Jarvis/api/node_modules/better-sqlite3/lib/database.js:48:64)
+2026-09-25T20:05:57:     at Object.<anonymous> (/root/Jarvis/api/db.js:50:12)
+2026-09-25T20:05:57:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-09-25T20:05:57:   code: 'ERR_DLOPEN_FAILED'
+2026-09-25T20:05:57: }
+2026-09-25T20:34:06: Error: Cannot find module 'dotenv'
+2026-09-25T20:34:06: Require stack:
+2026-09-25T20:34:06: - /root/Jarvis/api/index.js
+2026-09-25T20:34:06:     at Module._resolveFilename (node:internal/modules/cjs/loader:1569:15)
+2026-09-25T20:34:06:     at wrapResolveFilename (node:internal/modules/cjs/loader:1123:27)
+2026-09-25T20:34:06:     at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1147:10)
+2026-09-25T20:34:06:     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1174:12)
+2026-09-25T20:34:06:     at Module._load (node:internal/modules/cjs/loader:1346:5)
+2026-09-25T20:34:06:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-09-25T20:34:06:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-09-25T20:34:06:     at require (node:internal/modules/helpers:196:16)
+2026-09-25T20:34:06:     at Object.<anonymous> (/root/Jarvis/api/index.js:3:1)
+2026-09-25T20:34:06:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-09-25T20:34:06:   code: 'MODULE_NOT_FOUND',
+2026-09-25T20:34:06:   requireStack: [ '/root/Jarvis/api/index.js' ]
+2026-09-25T20:34:06: }
+2026-10-02T07:19:34: Error: The module '/root/Jarvis/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+2026-10-02T07:19:34: was compiled against a different Node.js version using
+2026-10-02T07:19:34: NODE_MODULE_VERSION 115. This version of Node.js requires
+2026-10-02T07:19:34: NODE_MODULE_VERSION 147. Please try re-compiling or re-installing
+2026-10-02T07:19:34: the module (for instance, using `npm rebuild` or `npm install`).
+2026-10-02T07:19:34:     at Object..node (node:internal/modules/cjs/loader:2101:18)
+2026-10-02T07:19:34:     at Module.load (node:internal/modules/cjs/loader:1656:32)
+2026-10-02T07:19:34:     at Module._load (node:internal/modules/cjs/loader:1448:12)
+2026-10-02T07:19:34:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-10-02T07:19:34:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-10-02T07:19:34:     at require (node:internal/modules/helpers:196:16)
+2026-10-02T07:19:34:     at bindings (/root/Jarvis/api/node_modules/bindings/bindings.js:112:48)
+2026-10-02T07:19:34:     at new Database (/root/Jarvis/api/node_modules/better-sqlite3/lib/database.js:48:64)
+2026-10-02T07:19:34:     at Object.<anonymous> (/root/Jarvis/api/db.js:50:12)
+2026-10-02T07:19:34:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-10-02T07:19:34:   code: 'ERR_DLOPEN_FAILED'
+2026-10-02T07:19:34: }
+2026-10-02T09:03:39: Error: The module '/root/Jarvis/api/node_modules/better-sqlite3/build/Release/better_sqlite3.node'
+2026-10-02T09:03:39: was compiled against a different Node.js version using
+2026-10-02T09:03:39: NODE_MODULE_VERSION 115. This version of Node.js requires
+2026-10-02T09:03:39: NODE_MODULE_VERSION 147. Please try re-compiling or re-installing
+2026-10-02T09:03:39: the module (for instance, using `npm rebuild` or `npm install`).
+2026-10-02T09:03:39:     at Object..node (node:internal/modules/cjs/loader:2101:18)
+2026-10-02T09:03:39:     at Module.load (node:internal/modules/cjs/loader:1656:32)
+2026-10-02T09:03:39:     at Module._load (node:internal/modules/cjs/loader:1448:12)
+2026-10-02T09:03:39:     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-10-02T09:03:39:     at Module.require (node:internal/modules/cjs/loader:1679:12)
+2026-10-02T09:03:39:     at require (node:internal/modules/helpers:196:16)
+2026-10-02T09:03:39:     at bindings (/root/Jarvis/api/node_modules/bindings/bindings.js:112:48)
+2026-10-02T09:03:39:     at new Database (/root/Jarvis/api/node_modules/better-sqlite3/lib/database.js:48:64)
+2026-10-02T09:03:39:     at Object.<anonymous> (/root/Jarvis/api/db.js:50:12)
+2026-10-02T09:03:39:     at Module._compile (node:internal/modules/cjs/loader:1934:14) {
+2026-10-02T09:03:39:   code: 'ERR_DLOPEN_FAILED'
+2026-10-02T09:03:39: }

@@ -21,6 +21,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 
 const { db, initDb, ensureRecurringMeetings } = require('./db');
 const { createRemoteDevRouter } = require('./remoteDev');
@@ -29,8 +31,11 @@ const gcal = require('./googleCalendar');
 const { attachDb } = require('./modules/push');
 const { generalLimiter } = require('./modules/limits');
 const { scheduleMeetingReminders } = require('./modules/events');
+const { initialize: initDiscord } = require('./discord');
 
 const app = express();
+const server = createServer(app);
+
 // Standard production flag (also used for the Secure cookie flag below).
 const isProd = process.env.NODE_ENV === 'production';
 // parseInt: a string PORT (e.g. from PM2's env or the shell) makes
@@ -59,6 +64,22 @@ app.use('/api', generalLimiter);
 // ── health check (unversioned, sits at /health outside the /api tree) ───────
 app.get('/health', (_, res) => res.json({ ok: true }));
 
+// ── Socket.IO setup ──────────────────────────────────────────────────────────
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    credentials: true,
+  },
+  allowEIO3: true,
+});
+
+// Forward Socket.IO to discord module for broadcasting
+initDiscord(io);
+
+// ── Discord relay routes ─────────────────────────────────────────────────────
+const discordRoutes = require('./routes/discord');
+app.use('/api/discord', discordRoutes);
+
 // ── feature routers, mounted under /api ──────────────────────────────────────
 // Router paths inside each file match the ORIGINAL monolith URLs exactly, so
 // the frontend keeps working with zero changes. The auth router owns both the
@@ -79,7 +100,7 @@ app.use('/api/remote-dev',         createRemoteDevRouter({ requireAuth: require(
 
 // ── start ────────────────────────────────────────────────────────────────────
 initDb().then(() => {
-  app.listen(PORT, () => console.log(`API listening on :${PORT}`));
+  server.listen(PORT, () => console.log(`API listening on :${PORT}`));
 
   // Keep the recurring weekly meetings seeded on long-running processes
   // (initDb seeds startup; this extends the horizon as days roll by).

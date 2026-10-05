@@ -21,10 +21,13 @@
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "autoprefixer": "^10.5.4",
+    "discord.js": "^14.27.0",
     "lucide-react": "^1.37.0",
     "postcss": "^8.5.26",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
     "tailwindcss": "^4.3.3",
     "web-push": "^3.6.7"
   },

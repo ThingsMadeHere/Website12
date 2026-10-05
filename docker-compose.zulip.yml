@@ -1,0 +1,84 @@
+---
+services:
+  database:
+    image: "zulip/zulip-postgresql:14"
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "zulip"
+      POSTGRES_USER: "zulip"
+      POSTGRES_PASSWORD: "zulip-db-password"
+    volumes:
+      - "postgresql-14:/var/lib/postgresql/data:rw"
+    networks:
+      - zulip
+
+  memcached:
+    image: "memcached:alpine"
+    restart: unless-stopped
+    networks:
+      - zulip
+
+  rabbitmq:
+    image: "rabbitmq:4.2"
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: "zulip"
+      RABBITMQ_DEFAULT_PASS: "zulip-rabbitmq-password"
+    volumes:
+      - "rabbitmq:/var/lib/rabbitmq:rw"
+    networks:
+      - zulip
+
+  redis:
+    image: "redis:alpine"
+    restart: unless-stopped
+    command: ["sh", "-c", "/usr/local/bin/docker-entrypoint.sh --requirepass zulip-redis-password"]
+    networks:
+      - zulip
+
+  zulip:
+    image: "ghcr.io/zulip/zulip-server:12.3-0"
+    restart: unless-stopped
+    ports:
+      - "8001:80"     # HTTP port
+      - "8443:443"    # HTTPS port (optional - for future SSL)
+    environment:
+      # Database configuration
+      SETTING_REMOTE_POSTGRES_HOST: "database"
+      SETTING_REMOTE_POSTGRES_PORT: "5432"
+      # Redis configuration
+      SETTING_REDIS_HOST: "redis"
+      SETTING_REDIS_PORT: "6379"
+      # Memcached configuration
+      SETTING_MEMCACHED_LOCATION: "memcached:11211"
+      # RabbitMQ configuration
+      SETTING_RABBITMQ_HOST: "rabbitmq"
+      # Zulip configuration
+      SETTING_EXTERNAL_HOST: "chat.mchsrobotics.dev"
+      SETTING_SERVER_EMAIL: "noreply@chat.mchsrobotics.dev"
+      # Admin user
+      ZULIP_ADMINISTRATOR: "admin@mchsrobotics.dev"
+      ZULIP_ADMIN_PASSWORD: "changeme-please-change-in-production"
+    volumes:
+      - "zulip:/data:rw"
+      - "./zulip/ssl:/data/certs:ro"
+    ulimits:
+      nofile:
+        soft: 1000000
+        hard: 1048576
+    depends_on:
+      - database
+      - memcached
+      - rabbitmq
+      - redis
+    networks:
+      - zulip
+
+volumes:
+  zulip:
+  postgresql-14:
+  rabbitmq:
+
+networks:
+  zulip:
+    driver: bridge

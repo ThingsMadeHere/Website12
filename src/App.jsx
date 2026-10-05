@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import LandingPage from './components/LandingPage';
-import MessageBoard from './components/MessageBoard';
+import DiscordChat from './components/DiscordChat';
 import FAQ from './components/FAQ';
 import HomePage from './components/HomePage';
 import CalendarPage from './components/CalendarPage';
@@ -8,7 +8,8 @@ import ApplicationsPage from './components/ApplicationsPage';
 import AdminPage from './components/AdminPage';
 import RemoteDevPage from './components/RemoteDevPage';
 import ProfilePage from './components/ProfilePage';
-import { MessageSquare, HelpCircle, Home, Calendar, LogIn, LogOut, ClipboardCheck, ShieldCheck, Terminal, User } from 'lucide-react';
+import EmailInbox from './components/EmailInbox';
+import { MessageSquare, HelpCircle, Home, Calendar, LogIn, LogOut, ClipboardCheck, ShieldCheck, Terminal, User, Mail } from 'lucide-react';
 import logo from './assets/output-onlinepngtools.png';
 import { initializePushNotifications } from './utils/pushNotifications';
 
@@ -36,6 +37,7 @@ function Navigation({ currentView, setCurrentView, session, onLogout }) {
           { view: 'chat',   icon: MessageSquare, label: 'Board'  },
           { view: 'faq',    icon: HelpCircle,    label: 'FAQ'    },
           { view: 'calendar', icon: Calendar,    label: 'Calendar' },
+          { view: 'email',  icon: Mail,          label: 'Email'  },
           { view: 'remote-dev', icon: Terminal,  label: 'Remote Dev' },
           ...(session?.admin
             ? [
@@ -219,6 +221,8 @@ export default function App() {
         setCurrentView(hash);
       } else if (hash === 'chat') {
         setCurrentView('chat');
+      } else if (hash === 'email') {
+        setCurrentView('email');
       } else if (hash === 'remote-dev' && session) {
         setCurrentView('remote-dev');
       } else if (hash === 'profile' && session) {
@@ -266,9 +270,10 @@ export default function App() {
         onLogout={handleLogout}
       />
       {currentView === 'home' && <HomePage />}
-      {currentView === 'chat' && session && <MessageBoard session={session} refreshSession={refreshSession} />}
+      {currentView === 'chat' && session && <DiscordChat session={session} />}
       {currentView === 'faq'  && <FAQ setCurrentView={setCurrentView} />}
       {currentView === 'calendar' && <CalendarPage session={session} setCurrentView={setCurrentView} />}
+      {currentView === 'email' && <EmailInbox />}
       {currentView === 'remote-dev' && session && <RemoteDevPage session={session} />}
       {currentView === 'profile' && session && <ProfilePage session={session} setCurrentView={setCurrentView} />}
       {currentView === 'applications' && session?.admin && <ApplicationsPage session={session} />}

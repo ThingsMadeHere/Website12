@@ -1,7 +1,7 @@
 # MCHS Robotics Website — Team Portal
 
 Team portal for FRC Team 5728: a public team site plus a members-only area with a
-**dead-simple messaging board**, a **meeting calendar**, and **accounts**.
+**Mattermost chat integration**, a **meeting calendar**, and **accounts**.
 
 ## What's inside
 
@@ -10,12 +10,13 @@ Team portal for FRC Team 5728: a public team site plus a members-only area with 
 | Frontend | React 19 + Vite + Tailwind CSS 4 |
 | Backend | Node.js + Express |
 | Database | SQLite (`better-sqlite3`) — one file, zero setup |
+| Chat | Zulip (iframe embedded) |
 | Live updates | HTTP polling every 2.5 s (no WebSockets needed) |
 
 ### Features
 
-- **Public site, members-only board** — Home, FAQ, and Calendar are open to
-  everyone; the sign-in screen only appears when a visitor opens the Board.
+- **Public site, members-only chat** — Home, FAQ, and Calendar are open to
+  everyone; the sign-in screen only appears when a visitor opens Chat.
 - **Applications, not open registration** — visitors apply with their full
   name, a chosen username/password, and a required photo (compressed
   client-side). The account is **not** created yet: the admin gets an email
@@ -27,12 +28,12 @@ Team portal for FRC Team 5728: a public team site plus a members-only area with 
   `api/db.js` → `ADMIN_USERNAMES`; promotion runs on startup and on approval).
 - **Admin panel** (admin-only **Admin** tab) — full member management:
   - **Role tags** — add/remove free-form tags (`mentor`, `lead`, `alumni`, …)
-    per member; tags show as colored pills next to names on the board. The
+    per member; tags show as colored pills next to names on the chat. The
     special **admin** tag grants/revokes admin access instantly (you can't
     remove your own).
   - **Account info & photos** — edit any member's full name, username,
     ✓ verified badge, and profile photo (photos approved through applications
-    are kept on the account and used as board avatars).
+    are kept on the account and used as chat avatars).
   - **Timeouts** — quick presets (10 min → 1 week) or a custom end date/time.
     A timed-out member can still sign in and read, but posting messages,
     proposing events, and voting are blocked until it expires or is lifted.
@@ -81,7 +82,7 @@ Team portal for FRC Team 5728: a public team site plus a members-only area with 
 │   └── components/
 │       ├── LandingPage.jsx    sign in / apply to join
 │       ├── ApplicationsPage.jsx  admin review queue (approve/deny)
-│       ├── MessageBoard.jsx   the board: channels + messages (polling)
+│       ├── MattermostChat.jsx  chat via Zulip iframe
 │       ├── CalendarPage.jsx   calendar widget
 │       ├── EventDialog.jsx    propose-an-event dialog
 │       ├── HomePage.jsx       public home
@@ -193,11 +194,6 @@ credentials.
 | PATCH | `/api/admin/users/:id` | admin | update `{ username?, fullName?, verified?, password?, mustChangePassword?, photo? }` (`photo: null` removes it) |
 | PUT | `/api/admin/users/:id/tags` | admin | replace tag set `{ tags: [...] }` — the `admin` tag syncs the admin flag |
 | POST | `/api/admin/users/:id/timeout` | admin | `{ minutes }` \| `{ until }` \| `{ clear: true }` — blocks posting, not reading |
-| GET | `/api/channels` | ✓ | list channels |
-| POST | `/api/channels` | ✓ | create channel |
-| GET | `/api/channels/:id/messages` | ✓ | history / poll (`?after=<id>&afterDel=<delId>`) |
-| POST | `/api/channels/:id/messages` | ✓ | post a message (blocked while timed out) |
-| DELETE | `/api/messages/:id` | ✓ | delete own message (admins: any message) |
 | GET | `/api/events` | – | calendar events |
 | POST | `/api/events` | ✓ | propose event (blocked while timed out) |
 | DELETE | `/api/events/:id` | ✓ | delete event |
@@ -205,3 +201,5 @@ credentials.
 | PUT | `/api/events/:id/approve` | ✓ | approve if majority yes |
 
 Auth = `Authorization: Bearer <token>` header.
+
+**Chat**: The chat feature has been migrated to Zulip. Access via the Chat tab which embeds your configured Zulip server (default: `https://chat.mchsrobotics.dev`). Configure your Zulip server URL in the chat header settings. See `MATTERMOST_SETUP.md` for Zulip setup instructions.
