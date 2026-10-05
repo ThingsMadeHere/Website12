@@ -9,6 +9,7 @@ import AdminPage from './components/AdminPage';
 import RemoteDevPage from './components/RemoteDevPage';
 import ProfilePage from './components/ProfilePage';
 import EmailInbox from './components/EmailInbox';
+import MagicLinkVerify from './components/MagicLinkVerify';
 import { MessageSquare, HelpCircle, Home, Calendar, LogIn, LogOut, ClipboardCheck, ShieldCheck, Terminal, User, Mail } from 'lucide-react';
 import logo from './assets/output-onlinepngtools.png';
 import { initializePushNotifications } from './utils/pushNotifications';
@@ -181,12 +182,18 @@ export default function App() {
     return () => clearInterval(t);
   }, [session?.token, refreshSession]);
 
-  const handleVerified = (sessionData) => {
-    setSession(sessionData);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
-    // They signed in to use the board — take them straight there.
-    setCurrentView('chat');
-  };
+  const handleVerified = useCallback((data) => {
+    // Handle both Google sign-in (with token) and magic link (pending approval)
+    if (data.token) {
+      // Google sign-in or magic link verification with token
+      setSession(data);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+      setCurrentView('chat');
+    } else if (data.email) {
+      // Magic link - email with pending approval
+      // Show success message
+    }
+  }, []);
 
   const handleLogout = () => {
     // Invalidate the session token on the server (fire-and-forget)
@@ -223,6 +230,8 @@ export default function App() {
         setCurrentView('chat');
       } else if (hash === 'email') {
         setCurrentView('email');
+      } else if (hash === 'verify') {
+        setCurrentView('verify');
       } else if (hash === 'remote-dev' && session) {
         setCurrentView('remote-dev');
       } else if (hash === 'profile' && session) {
@@ -259,6 +268,11 @@ export default function App() {
   // Remote dev is also members-only
   if (!session && currentView === 'remote-dev') {
     return <LandingPage onVerified={handleVerified} onBack={handleBackToSite} />;
+  }
+
+  // Magic link verification page
+  if (currentView === 'verify') {
+    return <MagicLinkVerify />;
   }
 
   return (

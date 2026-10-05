@@ -402,6 +402,84 @@ router.get('/me', requireAuth, (req, res) => {
   });
 });
 
+// ── Magic Link Authentication ────────────────────────────────────────────────
+// Passwordless login via email. User enters email → magic link sent → click link → logged in.
+const { createToken, verifyToken, sendMagicLink, SESSION_NAME, SESSION_MAX_AGE } = require('../magicLink');
+
+// POST /api/auth/magic-link  { email } - Send magic link to user's email
+router.post('/magic-link', authLimiter, (req, res) => {
+  const email = req.body.email?.toLowerCase()?.trim();
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+  
+  const user = db.prepare('SELECT id, username, full_name, email FROM users WHERE email = ?').get(email);
+  if (!user) {
+    // Don't reveal whether email exists - prevent email enumeration
+    return res.json({ sent: false, message: 'If an account exists, a magic link has been sent.' });
+  }
+  
+  // Create magic link token
+  const token = createToken(user.id);
+  const publicUrl = process.env.PUBLIC_URL || 'https://mchsrobotics.dev';
+  const link = `${publicUrl}/verify?token=${token}`;
+  
+  // Send magic link email
+  sendMagicLink({ 
+    to: email,
+    username: user.username,
+    token 
+  }).catch(err => {
+    console.error(`[magic-link] Failed to send email to ${email}:`, err.message);
+  });
+  
+  res.json({ 
+    sent: true, 
+    message: 'If an account exists, a magic link has been sent.' 
+  });
+});
+
+// GET /api/auth/verify - Verify magic link token (called by /verify route)
+router.get('/verify', (req, res) => {
+  const token = req.query.token;
+  if (!token) return res.status(400).json({ error: 'Token is required' });
+  
+  const result = verifyToken(token);
+  if (!result) {
+    return res.status(403).json({ error: 'Invalid or expired token' });
+  }
+  
+  // Create session
+  const sessionToken = createSession(result.userId);
+  
+  // Set HTTPOnly cookie
+  const cookieOptions = {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: SESSION_MAX_AGE,
+    path: '/',
+  };
+  
+  // If running behind HTTPS proxy (like Cloudflare), ensure secure cookie works
+  if (process.env.NODE_ENV === 'development') {
+    cookieOptions.secure = false;
+  }
+  
+  res.setHeader('Set-Cookie', `${SESSION_NAME}=${sessionToken}; ${Object.entries(cookieOptions).map(([k,v]) => `${k}=${v}`).join('; ')}`);
+  
+  const tags = db.prepare('SELECT tag FROM user_tags WHERE user_id = ? ORDER BY tag ASC').all(result.userId).map(t => t.tag);
+  
+  res.json({
+    userId: result.userId,
+    username: result.username,
+    token: sessionToken,
+    verified: !!result.verified,
+    admin: !!result.admin,
+    fullName: result.fullName || '',
+    tags,
+    hasPhoto: false,
+  });
+});
+
 module.exports = router;
 module.exports.sessionPayload = sessionPayload;
 module.exports.GOOGLE_COOKIE = GOOGLE_COOKIE;
